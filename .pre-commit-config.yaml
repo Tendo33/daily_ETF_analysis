@@ -36,3 +36,21 @@ repos:
 # Configuration for pre-commit
 default_stages: [pre-commit]
 fail_fast: false
+
+exclude: |
+  (?x)^(
+    venv/.*|
+    tests/.*|
+    docs/.*|
+    build/.*|
+    dist/.*|
+    \.agent/.*|
+    \.agents/.*|
+    \.claude/.*|
+    \.codex/.*|
+    \.cursor/.*|
+    \.cursorrules/.*|
+    \.github/.*|
+    \.pytest_cache/.*|
+    \.ruff_cache/.*
+  )$
