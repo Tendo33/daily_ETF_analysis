@@ -1,0 +1,123 @@
+name: Daily ETF Analysis
+
+on:
+  schedule:
+    # Weekdays 21:00 Asia/Shanghai (UTC+8) = 13:00 UTC
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: "Force run (skip trading-day guard)"
+        required: false
+        default: false
+        type: boolean
+      symbols:
+        description: "Comma-separated symbols, e.g. CN:159659,US:QQQ"
+        required: false
+        default: ""
+        type: string
+      market:
+        description: "Optional market filter"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - cn
+          - hk
+          - us
+      skip_notify:
+        description: "Skip Feishu notification"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: daily-etf-analysis-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Prepare directories
+        run: mkdir -p data logs reports
+
+      - name: Config probe (no secrets)
+        env:
+          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
+          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+        run: |
+          echo "LLM_CHANNELS configured: $([ -n "$LLM_CHANNELS" ] && echo yes || echo no)"
+          echo "LLM_AIHUBMIX_API_KEY configured: $([ -n "$LLM_AIHUBMIX_API_KEY" ] && echo yes || echo no)"
+          echo "TAVILY_API_KEYS configured: $([ -n "$TAVILY_API_KEYS" ] && echo yes || echo no)"
+          echo "FEISHU_WEBHOOK_URL configured: $([ -n "$FEISHU_WEBHOOK_URL" ] && echo yes || echo no)"
+          echo "TUSHARE_TOKEN configured: $([ -n "$TUSHARE_TOKEN" ] && echo yes || echo no)"
+
+      - name: Run daily analysis
+        env:
+          ETF_LIST: ${{ vars.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
+          INDEX_PROXY_MAP: ${{ vars.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
+          MARKETS_ENABLED: ${{ vars.MARKETS_ENABLED || 'cn,hk,us' }}
+          DATABASE_URL: sqlite:///./data/daily_etf_analysis.db
+          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
+          PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
+          LITELLM_MODEL: ${{ vars.LITELLM_MODEL }}
+          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
+          LLM_AIHUBMIX_BASE_URL: ${{ vars.LLM_AIHUBMIX_BASE_URL }}
+          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
+          LLM_AIHUBMIX_MODELS: ${{ vars.LLM_AIHUBMIX_MODELS }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FORCE_RUN_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_run || 'false' }}
+          SYMBOLS_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.symbols || '' }}
+          MARKET_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.market || 'all' }}
+          SKIP_NOTIFY_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_notify || 'false' }}
+        run: |
+          ARGS=()
+          if [ "$FORCE_RUN_INPUT" = "true" ]; then
+            ARGS+=(--force-run)
+          fi
+          if [ -n "$SYMBOLS_INPUT" ]; then
+            ARGS+=(--symbols "$SYMBOLS_INPUT")
+          fi
+          if [ "$MARKET_INPUT" != "all" ]; then
+            ARGS+=(--market "$MARKET_INPUT")
+          fi
+          if [ "$SKIP_NOTIFY_INPUT" = "true" ]; then
+            ARGS+=(--skip-notify)
+          fi
+          uv run python scripts/run_daily_analysis.py "${ARGS[@]}"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-etf-analysis-${{ github.run_number }}
+          path: |
+            reports/
+            logs/
+          retention-days: 30

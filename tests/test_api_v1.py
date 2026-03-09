@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import importlib
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi.testclient import TestClient
 
 from daily_etf_analysis.api.app import app
-from daily_etf_analysis.domain import AnalysisTask, TaskStatus
+from daily_etf_analysis.domain import (
+    AnalysisTask,
+    IndexComparisonResult,
+    IndexComparisonRow,
+    TaskStatus,
+)
 
 
 class _FakeService:
@@ -16,8 +21,8 @@ class _FakeService:
             status=TaskStatus.PENDING,
             symbols=["CN:159659"],
             force_refresh=False,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
     def run_analysis(self, symbols=None, force_refresh=False):  # type: ignore[no-untyped-def]
@@ -61,6 +66,45 @@ class _FakeService:
             }
         ]
 
+    def get_index_comparison(self, index_symbol, target_date=None):  # type: ignore[no-untyped-def]
+        if index_symbol == "MISSING":
+            raise ValueError("No ETF mapping found for MISSING")
+        report_date = target_date or date.today()
+        return IndexComparisonResult(
+            index_symbol=index_symbol,
+            report_date=report_date,
+            rows=[
+                IndexComparisonRow(
+                    symbol="US:QQQ",
+                    market="US",
+                    score=88,
+                    action="buy",
+                    confidence="high",
+                    latest_price=111.1,
+                    change_pct=1.2,
+                    return_20=0.11,
+                    return_60=0.24,
+                    rank=1,
+                    model_used="openai/gpt-4o-mini",
+                    success=True,
+                )
+            ],
+        )
+
+    def get_provider_health(self):  # type: ignore[no-untyped-def]
+        return [
+            {
+                "provider": "efinance",
+                "operation": "daily_bars",
+                "success_count": 2,
+                "failure_count": 1,
+                "retry_count": 1,
+                "circuit_state": "closed",
+                "last_error": None,
+                "last_updated": datetime.now(UTC).isoformat(),
+            }
+        ]
+
 
 def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
@@ -91,6 +135,25 @@ def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
         f"/api/v1/reports/daily?date={date.today().isoformat()}&market=all"
     )
     assert report_resp.status_code == 200
+
+    compare_resp = client.get(
+        f"/api/v1/index-comparisons?index_symbol=NDX&date={date.today().isoformat()}"
+    )
+    assert compare_resp.status_code == 200
+    assert compare_resp.json()["index_symbol"] == "NDX"
+    assert compare_resp.json()["rows"][0]["symbol"] == "US:QQQ"
+
+    compare_not_found = client.get(
+        f"/api/v1/index-comparisons?index_symbol=MISSING&date={date.today().isoformat()}"
+    )
+    assert compare_not_found.status_code == 404
+
+    compare_bad_request = client.get("/api/v1/index-comparisons")
+    assert compare_bad_request.status_code == 422
+
+    provider_health = client.get("/api/v1/system/provider-health")
+    assert provider_health.status_code == 200
+    assert provider_health.json()[0]["provider"] == "efinance"
 
 
 def test_health() -> None:

@@ -12,6 +12,7 @@ from .log_config import (
     setup_logging,
     warning,
 )
+from .provider_stats import get_provider_health_snapshot
 
 __all__ = [
     "setup_logging",
@@ -24,4 +25,5 @@ __all__ = [
     "error",
     "critical",
     "exception",
+    "get_provider_health_snapshot",
 ]

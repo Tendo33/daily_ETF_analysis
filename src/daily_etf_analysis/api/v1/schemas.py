@@ -37,3 +37,35 @@ class ReplaceIndexMappingsRequest(BaseModel):
 class DailyReportQuery(BaseModel):
     date: date
     market: str = "all"
+
+
+class IndexComparisonRowResponse(BaseModel):
+    symbol: str
+    market: str
+    score: int
+    action: str
+    confidence: str
+    latest_price: float | None = None
+    change_pct: float | None = None
+    return_20: float | None = None
+    return_60: float | None = None
+    rank: int
+    model_used: str | None = None
+    success: bool
+
+
+class IndexComparisonResponse(BaseModel):
+    index_symbol: str
+    report_date: date
+    rows: list[IndexComparisonRowResponse]
+
+
+class ProviderHealthResponse(BaseModel):
+    provider: str
+    operation: str
+    success_count: int
+    failure_count: int
+    retry_count: int
+    circuit_state: str
+    last_error: str | None = None
+    last_updated: str

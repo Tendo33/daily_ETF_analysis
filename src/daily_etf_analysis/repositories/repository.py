@@ -210,6 +210,10 @@ class EtfRepository:
                 mapping.setdefault(row.index_symbol, []).append(row.proxy_symbol)
             return mapping
 
+    def get_index_proxy_symbols(self, index_symbol: str) -> list[str]:
+        mapping = self.list_index_mappings()
+        return mapping.get(index_symbol.upper(), [])
+
     def save_daily_bars(self, bars: list[EtfDailyBar]) -> None:
         if not bars:
             return
@@ -444,3 +448,93 @@ class EtfRepository:
                     }
                 )
             return result
+
+    def get_latest_report_trade_date_for_task(self, task_id: str) -> date | None:
+        with self.session() as db:
+            return (
+                db.execute(
+                    select(EtfAnalysisReportORM.trade_date)
+                    .where(EtfAnalysisReportORM.task_id == task_id)
+                    .order_by(desc(EtfAnalysisReportORM.trade_date))
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+
+    def get_latest_reports_for_symbols(
+        self, symbols: list[str], report_date: date | None = None
+    ) -> dict[str, dict[str, Any]]:
+        if not symbols:
+            return {}
+        normalized_symbols = [s.upper() for s in symbols]
+        with self.session() as db:
+            query = select(EtfAnalysisReportORM).where(
+                EtfAnalysisReportORM.symbol.in_(normalized_symbols)
+            )
+            if report_date is not None:
+                query = query.where(EtfAnalysisReportORM.trade_date == report_date)
+            rows = (
+                db.execute(
+                    query.order_by(
+                        EtfAnalysisReportORM.symbol,
+                        desc(EtfAnalysisReportORM.trade_date),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            latest: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                if row.symbol in latest:
+                    continue
+                latest[row.symbol] = {
+                    "symbol": row.symbol,
+                    "trade_date": row.trade_date,
+                    "score": row.score,
+                    "trend": row.trend,
+                    "action": row.action,
+                    "confidence": row.confidence,
+                    "summary": row.summary,
+                    "model_used": row.model_used,
+                    "success": row.success,
+                    "error_message": row.error_message,
+                    "factors": json.loads(row.factors_json),
+                    "key_points": json.loads(row.key_points_json),
+                    "risk_alerts": json.loads(row.risk_alerts_json),
+                }
+            return latest
+
+    def get_latest_quotes_for_symbols(
+        self, symbols: list[str]
+    ) -> dict[str, EtfRealtimeQuote]:
+        if not symbols:
+            return {}
+        normalized_symbols = [s.upper() for s in symbols]
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(EtfRealtimeQuoteORM)
+                    .where(EtfRealtimeQuoteORM.symbol.in_(normalized_symbols))
+                    .order_by(
+                        EtfRealtimeQuoteORM.symbol, desc(EtfRealtimeQuoteORM.quote_time)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            latest: dict[str, EtfRealtimeQuote] = {}
+            for row in rows:
+                if row.symbol in latest:
+                    continue
+                latest[row.symbol] = EtfRealtimeQuote(
+                    symbol=row.symbol,
+                    price=row.price,
+                    change_pct=row.change_pct,
+                    turnover=row.turnover,
+                    volume=row.volume,
+                    amount=row.amount,
+                    quote_time=row.quote_time,
+                    source=row.source,
+                )
+            return latest

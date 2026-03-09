@@ -104,3 +104,26 @@ class AnalysisTask:
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     error: str | None = None
+
+
+@dataclass(slots=True)
+class IndexComparisonRow:
+    symbol: str
+    market: str
+    score: int
+    action: str
+    confidence: str
+    latest_price: float | None
+    change_pct: float | None
+    return_20: float | None
+    return_60: float | None
+    rank: int
+    model_used: str | None = None
+    success: bool = True
+
+
+@dataclass(slots=True)
+class IndexComparisonResult:
+    index_symbol: str
+    report_date: date
+    rows: list[IndexComparisonRow]

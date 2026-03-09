@@ -11,6 +11,7 @@ from daily_etf_analysis.domain import (
     Market,
     split_symbol,
 )
+from daily_etf_analysis.providers.resilience import CircuitBreaker, run_with_resilience
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class DataFetcherManager:
         providers: Sequence[MarketDataProvider] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
         if providers is not None:
             self.providers = list(providers)
         else:
@@ -43,8 +45,17 @@ class DataFetcherManager:
         from daily_etf_analysis.providers.market_data.akshare_provider import (
             AkshareProvider,
         )
+        from daily_etf_analysis.providers.market_data.baostock_provider import (
+            BaostockProvider,
+        )
         from daily_etf_analysis.providers.market_data.efinance_provider import (
             EfinanceProvider,
+        )
+        from daily_etf_analysis.providers.market_data.pytdx_provider import (
+            PytdxProvider,
+        )
+        from daily_etf_analysis.providers.market_data.tushare_provider import (
+            TushareProvider,
         )
         from daily_etf_analysis.providers.market_data.yfinance_provider import (
             YfinanceProvider,
@@ -53,6 +64,9 @@ class DataFetcherManager:
         provider_map = {
             "efinance": EfinanceProvider(self.settings),
             "akshare": AkshareProvider(self.settings),
+            "tushare": TushareProvider(self.settings),
+            "pytdx": PytdxProvider(self.settings),
+            "baostock": BaostockProvider(self.settings),
             "yfinance": YfinanceProvider(self.settings),
         }
         ordered = [
@@ -80,8 +94,20 @@ class DataFetcherManager:
     ) -> tuple[list[EtfDailyBar], str]:
         errors: list[str] = []
         for provider in self._ordered_for_symbol(symbol):
+
+            def _fetch_daily(
+                current_provider: MarketDataProvider = provider,
+            ) -> list[EtfDailyBar]:
+                return current_provider.get_daily_bars(symbol=symbol, days=days)
+
             try:
-                bars = provider.get_daily_bars(symbol=symbol, days=days)
+                bars = run_with_resilience(
+                    provider=provider.name,
+                    operation="daily_bars",
+                    call=_fetch_daily,
+                    settings=self.settings,
+                    circuit_breakers=self._circuit_breakers,
+                )
                 if bars:
                     return bars, provider.name
                 errors.append(f"{provider.name}: empty result")
@@ -102,8 +128,20 @@ class DataFetcherManager:
     ) -> tuple[EtfRealtimeQuote | None, str | None]:
         errors: list[str] = []
         for provider in self._ordered_for_symbol(symbol):
+
+            def _fetch_quote(
+                current_provider: MarketDataProvider = provider,
+            ) -> EtfRealtimeQuote | None:
+                return current_provider.get_realtime_quote(symbol=symbol)
+
             try:
-                quote = provider.get_realtime_quote(symbol=symbol)
+                quote = run_with_resilience(
+                    provider=provider.name,
+                    operation="realtime_quote",
+                    call=_fetch_quote,
+                    settings=self.settings,
+                    circuit_breakers=self._circuit_breakers,
+                )
                 if quote:
                     return quote, provider.name
                 errors.append(f"{provider.name}: empty result")

@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import date
 
 from daily_etf_analysis.config.settings import Settings, get_settings
-from daily_etf_analysis.domain import AnalysisTask, EtfInstrument, normalize_symbol
+from daily_etf_analysis.domain import (
+    AnalysisTask,
+    EtfInstrument,
+    IndexComparisonResult,
+    IndexComparisonRow,
+    normalize_symbol,
+)
+from daily_etf_analysis.observability import get_provider_health_snapshot
 from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
 from daily_etf_analysis.services.task_manager import TaskManager
@@ -108,3 +115,103 @@ class AnalysisService:
     ) -> list[dict[str, object]]:
         market_filter = None if market in (None, "all") else market
         return self.repository.get_daily_reports(target_date, market=market_filter)
+
+    def get_task_report_date(self, task_id: str) -> date | None:
+        return self.repository.get_latest_report_trade_date_for_task(task_id)
+
+    def get_index_comparison(
+        self, index_symbol: str, target_date: date | None = None
+    ) -> IndexComparisonResult:
+        normalized_index = index_symbol.strip().upper()
+        if not normalized_index:
+            raise ValueError("index_symbol is required")
+
+        proxy_symbols = self.repository.get_index_proxy_symbols(normalized_index)
+        if not proxy_symbols:
+            raise ValueError(f"No ETF mapping found for {normalized_index}")
+
+        latest_reports = self.repository.get_latest_reports_for_symbols(
+            symbols=proxy_symbols, report_date=target_date
+        )
+        latest_quotes = self.repository.get_latest_quotes_for_symbols(proxy_symbols)
+
+        rows: list[IndexComparisonRow] = []
+        for symbol in proxy_symbols:
+            report = latest_reports.get(symbol)
+            if report is None:
+                continue
+            quote = latest_quotes.get(symbol)
+            factors = report.get("factors", {})
+            row = IndexComparisonRow(
+                symbol=symbol,
+                market=symbol.split(":", 1)[0],
+                score=int(report.get("score", 50)),
+                action=str(report.get("action", "hold")),
+                confidence=str(report.get("confidence", "low")),
+                latest_price=quote.price
+                if quote is not None
+                else _to_float_or_none(factors.get("latest_price")),
+                change_pct=quote.change_pct
+                if quote is not None
+                else _to_float_or_none(factors.get("change_pct")),
+                return_20=_to_float_or_none(factors.get("return_20")),
+                return_60=_to_float_or_none(factors.get("return_60")),
+                rank=0,
+                model_used=(
+                    str(report.get("model_used"))
+                    if report.get("model_used") is not None
+                    else None
+                ),
+                success=bool(report.get("success", True)),
+            )
+            rows.append(row)
+
+        rows.sort(
+            key=lambda row: (
+                -row.score,
+                -_confidence_weight(row.confidence),
+                -(row.return_20 if row.return_20 is not None else float("-inf")),
+                row.symbol,
+            )
+        )
+        for idx, row in enumerate(rows, start=1):
+            row.rank = idx
+
+        if target_date is not None:
+            report_date = target_date
+        elif latest_reports:
+            report_date = max(
+                report["trade_date"]
+                for report in latest_reports.values()
+                if isinstance(report.get("trade_date"), date)
+            )
+        else:
+            report_date = date.today()
+
+        return IndexComparisonResult(
+            index_symbol=normalized_index, report_date=report_date, rows=rows
+        )
+
+    def get_provider_health(self) -> list[dict[str, object]]:
+        return get_provider_health_snapshot()
+
+
+def _confidence_weight(value: str) -> int:
+    mapping = {"high": 3, "medium": 2, "low": 1}
+    return mapping.get(value.lower(), 0)
+
+
+def _to_float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None

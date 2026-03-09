@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.providers.news.base import NewsItem, NewsProvider
 from daily_etf_analysis.providers.news.tavily_provider import TavilyProvider
+from daily_etf_analysis.providers.resilience import CircuitBreaker, run_with_resilience
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class NewsProviderManager:
         providers: Sequence[NewsProvider] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
         if providers is not None:
             self.providers = list(providers)
         else:
@@ -40,8 +42,22 @@ class NewsProviderManager:
     ) -> tuple[list[NewsItem], str | None]:
         errors: list[str] = []
         for provider in self.providers:
+
+            def _search_news(
+                current_provider: NewsProvider = provider,
+            ) -> list[NewsItem]:
+                return current_provider.search(
+                    query=query, max_results=max_results, days=days
+                )
+
             try:
-                items = provider.search(query=query, max_results=max_results, days=days)
+                items = run_with_resilience(
+                    provider=provider.name,
+                    operation="news_search",
+                    call=_search_news,
+                    settings=self.settings,
+                    circuit_breakers=self._circuit_breakers,
+                )
                 if items:
                     return items, provider.name
                 errors.append(f"{provider.name}: empty result")

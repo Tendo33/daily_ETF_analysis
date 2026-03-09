@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import date
 from functools import lru_cache
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
 from daily_etf_analysis.api.v1.schemas import (
+    IndexComparisonResponse,
+    IndexComparisonRowResponse,
+    ProviderHealthResponse,
     ReplaceEtfsRequest,
     ReplaceIndexMappingsRequest,
     RunAnalysisRequest,
@@ -144,3 +148,43 @@ def get_daily_report(
 ) -> list[dict[str, object]]:
     report_date = date.fromisoformat(date_str)
     return _service().get_daily_report(report_date, market=market)
+
+
+@router.get("/index-comparisons", response_model=IndexComparisonResponse)
+def get_index_comparisons(
+    index_symbol: Annotated[str, Query(min_length=1)],
+    target_date: Annotated[date | None, Query(alias="date")] = None,
+) -> IndexComparisonResponse:
+    try:
+        result = _service().get_index_comparison(
+            index_symbol=index_symbol, target_date=target_date
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return IndexComparisonResponse(
+        index_symbol=result.index_symbol,
+        report_date=result.report_date,
+        rows=[
+            IndexComparisonRowResponse(
+                symbol=row.symbol,
+                market=row.market,
+                score=row.score,
+                action=row.action,
+                confidence=row.confidence,
+                latest_price=row.latest_price,
+                change_pct=row.change_pct,
+                return_20=row.return_20,
+                return_60=row.return_60,
+                rank=row.rank,
+                model_used=row.model_used,
+                success=row.success,
+            )
+            for row in result.rows
+        ],
+    )
+
+
+@router.get("/system/provider-health", response_model=list[ProviderHealthResponse])
+def get_provider_health() -> list[ProviderHealthResponse]:
+    items = _service().get_provider_health()
+    return [ProviderHealthResponse.model_validate(item) for item in items]

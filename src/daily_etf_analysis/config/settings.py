@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     realtime_source_priority: list[str] = Field(
         default_factory=lambda: ["efinance", "akshare", "yfinance"]
     )
+    tushare_token: str | None = Field(default=None)
+    pytdx_host: str = Field(default="119.147.212.81")
+    pytdx_port: int = Field(default=7709)
+    provider_max_retries: int = Field(default=1, ge=0, le=5)
+    provider_backoff_ms: int = Field(default=200, ge=0, le=10_000)
+    provider_circuit_fail_threshold: int = Field(default=3, ge=1, le=20)
+    provider_circuit_reset_seconds: int = Field(default=60, ge=1, le=3600)
+
+    feishu_webhook_url: str | None = Field(default=None)
+
     schedule_enabled: bool = Field(default=False)
     schedule_cron_cn: str = Field(default="0 30 15 * * 1-5")
     schedule_cron_hk: str = Field(default="0 10 16 * * 1-5")
@@ -324,6 +334,14 @@ class Settings(BaseSettings):
                     "warning",
                     "TAVILY_API_KEYS not configured. News context will be unavailable.",
                     "TAVILY_API_KEYS",
+                )
+            )
+        if not self.feishu_webhook_url:
+            issues.append(
+                ConfigIssue(
+                    "info",
+                    "FEISHU_WEBHOOK_URL not configured. Daily analysis notifications are disabled.",
+                    "FEISHU_WEBHOOK_URL",
                 )
             )
         return issues

@@ -56,17 +56,19 @@ class YfinanceProvider(MarketDataProvider):
         )
         if df.empty:
             return []
-        if "Close" not in df.columns:
-            # Sometimes yfinance returns MultiIndex columns.
+        # yfinance may return MultiIndex columns or duplicated labels.
+        if getattr(df.columns, "nlevels", 1) > 1:
             df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
         bars: list[EtfDailyBar] = []
         for index, row in df.tail(days).iterrows():
-            close = float(row.get("Close", 0))
-            open_ = float(row.get("Open", close))
-            high = float(row.get("High", close))
-            low = float(row.get("Low", close))
+            close = _as_float(row.get("Close"), default=0.0)
+            open_ = _as_float(row.get("Open"), default=close)
+            high = _as_float(row.get("High"), default=close)
+            low = _as_float(row.get("Low"), default=close)
             volume = (
-                float(row.get("Volume", 0)) if row.get("Volume") is not None else None
+                _as_float(row.get("Volume"), default=0.0)
+                if row.get("Volume") is not None
+                else None
             )
             amount = volume * close if volume is not None else None
             bars.append(
@@ -107,3 +109,25 @@ class YfinanceProvider(MarketDataProvider):
             quote_time=datetime.utcnow(),
             source=self.name,
         )
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if hasattr(value, "iloc"):
+        try:
+            first = value.iloc[0]  # type: ignore[index]
+            return float(first)
+        except Exception:  # noqa: BLE001
+            return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float | str):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return default

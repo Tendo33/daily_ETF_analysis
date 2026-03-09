@@ -12,6 +12,8 @@ from daily_etf_analysis.domain.models import (
     EtfDailyBar,
     EtfInstrument,
     EtfRealtimeQuote,
+    IndexComparisonResult,
+    IndexComparisonRow,
 )
 from daily_etf_analysis.domain.symbols import (
     infer_market,
@@ -28,6 +30,8 @@ __all__ = [
     "EtfDailyBar",
     "EtfInstrument",
     "EtfRealtimeQuote",
+    "IndexComparisonResult",
+    "IndexComparisonRow",
     "Market",
     "TaskStatus",
     "Trend",
