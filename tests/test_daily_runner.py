@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import pytest
+
 from daily_etf_analysis.cli.run_daily_analysis import (
     _exit_code_for_status,
     parse_cli_args,
@@ -29,8 +31,19 @@ class _FakeService:
         )
         self._poll_count = 0
 
-    def run_analysis(self, symbols=None, force_refresh=False):  # type: ignore[no-untyped-def]
-        self.run_calls.append({"symbols": symbols, "force_refresh": force_refresh})
+    def run_analysis(  # type: ignore[no-untyped-def]
+        self,
+        symbols=None,
+        force_refresh=False,
+        skip_market_guard=False,
+    ):
+        self.run_calls.append(
+            {
+                "symbols": symbols,
+                "force_refresh": force_refresh,
+                "skip_market_guard": skip_market_guard,
+            }
+        )
         self._task.symbols = list(symbols or [])
         self._task.force_refresh = bool(force_refresh)
         self._task.status = TaskStatus.RUNNING
@@ -84,6 +97,14 @@ def test_parse_cli_args() -> None:
     assert args.skip_notify is True
 
 
+def test_force_run_help_describes_guard_and_refresh(capsys) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(SystemExit):
+        parse_cli_args(["--help"])
+    out = capsys.readouterr().out
+    assert "--force-run" in out
+    assert "skip trading-day guard and force refresh" in out.lower()
+
+
 def test_run_daily_analysis_market_filter_and_notify(tmp_path: Path) -> None:
     settings = Settings(
         etf_list=["CN:159659", "US:QQQ", "HK:02800"],
@@ -106,6 +127,7 @@ def test_run_daily_analysis_market_filter_and_notify(tmp_path: Path) -> None:
     )
 
     assert service.run_calls[0]["symbols"] == ["CN:159659"]
+    assert service.run_calls[0]["skip_market_guard"] is False
     assert result["task_id"] == "task-123"
     assert result["status"] == "completed"
     assert Path(str(result["report_path"])).exists()
@@ -132,6 +154,8 @@ def test_run_daily_analysis_skip_notify(tmp_path: Path) -> None:
     )
 
     assert result["status"] == "completed"
+    assert service.run_calls[0]["force_refresh"] is True
+    assert service.run_calls[0]["skip_market_guard"] is True
     assert result["notification_sent"] is False
     assert result["notification_reason"] == "skipped"
     assert len(notifier.calls) == 0

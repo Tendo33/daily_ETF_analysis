@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from daily_etf_analysis.config.settings import Settings, get_settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     AnalysisTask,
     EtfAnalysisResult,
@@ -46,7 +47,7 @@ class EtfInstrumentORM(Base):
     benchmark_index: Mapped[str] = mapped_column(String(32), default="")
     currency: Mapped[str] = mapped_column(String(16), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
 
 
 class IndexProxyMappingORM(Base):
@@ -99,8 +100,8 @@ class AnalysisTaskORM(Base):
     symbols_json: Mapped[str] = mapped_column(Text, default="[]")
     force_refresh: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
 
 
 class EtfAnalysisReportORM(Base):
@@ -160,7 +161,7 @@ class EtfRepository:
                         benchmark_index=item.benchmark_index,
                         currency=item.currency,
                         enabled=item.enabled,
-                        updated_at=datetime.utcnow(),
+                        updated_at=utc_now_naive(),
                     )
                 )
 
@@ -344,7 +345,7 @@ class EtfRepository:
             ).scalar_one()
             row.status = status.value
             row.error = error
-            row.updated_at = datetime.utcnow()
+            row.updated_at = utc_now_naive()
 
     def get_task(self, task_id: str) -> AnalysisTask | None:
         with self.session() as db:

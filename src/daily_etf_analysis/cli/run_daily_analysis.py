@@ -17,7 +17,11 @@ SKIPPED_STATUS = "skipped"
 
 def parse_cli_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run daily ETF analysis task")
-    parser.add_argument("--force-run", action="store_true", help="Force refresh")
+    parser.add_argument(
+        "--force-run",
+        action="store_true",
+        help="Skip trading-day guard and force refresh",
+    )
     parser.add_argument(
         "--symbols",
         type=str,
@@ -101,6 +105,7 @@ def run_daily_analysis(
     task = service.run_analysis(
         symbols=selected_symbols,
         force_refresh=force_run,
+        skip_market_guard=force_run,
     )
     final_task = _wait_task_completion(
         service=service,

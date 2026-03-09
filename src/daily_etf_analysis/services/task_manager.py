@@ -3,8 +3,8 @@ from __future__ import annotations
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus, normalize_symbol
 from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
@@ -20,7 +20,12 @@ class TaskManager:
         self._lock = threading.Lock()
         self._inflight_symbols: set[str] = set()
 
-    def submit(self, symbols: list[str], force_refresh: bool = False) -> AnalysisTask:
+    def submit(
+        self,
+        symbols: list[str],
+        force_refresh: bool = False,
+        skip_market_guard: bool = False,
+    ) -> AnalysisTask:
         normalized_symbols = [normalize_symbol(s) for s in symbols]
         with self._lock:
             duplicates = self._inflight_symbols.intersection(normalized_symbols)
@@ -34,20 +39,33 @@ class TaskManager:
             status=TaskStatus.PENDING,
             symbols=normalized_symbols,
             force_refresh=force_refresh,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=utc_now_naive(),
+            updated_at=utc_now_naive(),
         )
         self.repository.create_task(task)
         self._executor.submit(
-            self._run_task, task.task_id, normalized_symbols, force_refresh
+            self._run_task,
+            task.task_id,
+            normalized_symbols,
+            force_refresh,
+            skip_market_guard,
         )
         return task
 
-    def _run_task(self, task_id: str, symbols: list[str], force_refresh: bool) -> None:
+    def _run_task(
+        self,
+        task_id: str,
+        symbols: list[str],
+        force_refresh: bool,
+        skip_market_guard: bool,
+    ) -> None:
         self.repository.update_task(task_id, TaskStatus.RUNNING)
         try:
             self.pipeline.run(
-                task_id=task_id, symbols=symbols, force_refresh=force_refresh
+                task_id=task_id,
+                symbols=symbols,
+                force_refresh=force_refresh,
+                skip_market_guard=skip_market_guard,
             )
             self.repository.update_task(task_id, TaskStatus.COMPLETED)
         except Exception as exc:  # noqa: BLE001

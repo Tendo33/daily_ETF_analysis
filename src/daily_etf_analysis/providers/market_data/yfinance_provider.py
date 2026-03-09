@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     EtfDailyBar,
     EtfRealtimeQuote,
@@ -106,7 +107,7 @@ class YfinanceProvider(MarketDataProvider):
             change_pct=change_pct,
             volume=volume,
             amount=volume * price if volume else None,
-            quote_time=datetime.utcnow(),
+            quote_time=utc_now_naive(),
             source=self.name,
         )
 

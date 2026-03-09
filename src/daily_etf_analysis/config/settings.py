@@ -68,7 +68,14 @@ class Settings(BaseSettings):
     news_provider_priority: list[str] = Field(default_factory=lambda: ["tavily"])
 
     realtime_source_priority: list[str] = Field(
-        default_factory=lambda: ["efinance", "akshare", "yfinance"]
+        default_factory=lambda: [
+            "efinance",
+            "akshare",
+            "tushare",
+            "pytdx",
+            "baostock",
+            "yfinance",
+        ]
     )
     tushare_token: str | None = Field(default=None)
     pytdx_host: str = Field(default="119.147.212.81")

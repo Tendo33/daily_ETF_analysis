@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import EtfDailyBar, EtfRealtimeQuote
 from daily_etf_analysis.providers.market_data.base import (
     DataFetcherManager,
@@ -41,7 +42,7 @@ class _SuccessProvider(MarketDataProvider):
             symbol=symbol,
             price=2.0,
             change_pct=1.0,
-            quote_time=datetime.utcnow(),
+            quote_time=utc_now_naive(),
             source=self.name,
         )
 

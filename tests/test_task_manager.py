@@ -8,7 +8,13 @@ from daily_etf_analysis.services.task_manager import TaskManager
 
 
 class _PipelineStub:
-    def run(self, task_id: str, symbols: list[str], force_refresh: bool = False):  # type: ignore[no-untyped-def]
+    def run(  # type: ignore[no-untyped-def]
+        self,
+        task_id: str,
+        symbols: list[str],
+        force_refresh: bool = False,
+        skip_market_guard: bool = False,
+    ):
         return []
 
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain.enums import (
     Action,
     Confidence,
@@ -22,7 +23,7 @@ class EtfInstrument:
     benchmark_index: str = ""
     currency: str = ""
     enabled: bool = True
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=utc_now_naive)
 
 
 @dataclass(slots=True)
@@ -47,7 +48,7 @@ class EtfRealtimeQuote:
     turnover: float | None = None
     volume: float | None = None
     amount: float | None = None
-    quote_time: datetime = field(default_factory=datetime.utcnow)
+    quote_time: datetime = field(default_factory=utc_now_naive)
     source: str = ""
 
 
@@ -101,8 +102,8 @@ class AnalysisTask:
     status: TaskStatus
     symbols: list[str]
     force_refresh: bool
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utc_now_naive)
+    updated_at: datetime = field(default_factory=utc_now_naive)
     error: str | None = None
 
 

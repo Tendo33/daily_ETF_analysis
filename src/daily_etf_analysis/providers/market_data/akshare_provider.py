@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     EtfDailyBar,
     EtfRealtimeQuote,
@@ -80,7 +81,7 @@ class AkshareProvider(MarketDataProvider):
                 amount=float(r.get("成交额", 0))
                 if r.get("成交额") is not None
                 else None,
-                quote_time=datetime.utcnow(),
+                quote_time=utc_now_naive(),
                 source=self.name,
             )
         if market == Market.HK:
@@ -98,7 +99,7 @@ class AkshareProvider(MarketDataProvider):
                 amount=float(r.get("成交额", 0))
                 if r.get("成交额") is not None
                 else None,
-                quote_time=datetime.utcnow(),
+                quote_time=utc_now_naive(),
                 source=self.name,
             )
         return None

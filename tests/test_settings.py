@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from daily_etf_analysis.config.settings import get_settings, reload_settings
+from daily_etf_analysis.config.settings import Settings, get_settings, reload_settings
 
 
 def test_get_settings_returns_cached_instance() -> None:
@@ -26,3 +26,16 @@ def test_reload_settings_reads_custom_env_file(tmp_path: Path) -> None:
     assert settings.log_level == "DEBUG"
 
     get_settings.cache_clear()
+
+
+def test_default_realtime_source_priority_is_phase2_chain(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("REALTIME_SOURCE_PRIORITY", raising=False)
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.realtime_source_priority == [
+        "efinance",
+        "akshare",
+        "tushare",
+        "pytdx",
+        "baostock",
+        "yfinance",
+    ]

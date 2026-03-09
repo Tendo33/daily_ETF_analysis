@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 
 import litellm
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     EtfAnalysisContext,
     EtfDailyBar,
@@ -22,7 +23,7 @@ def _context(symbol: str = "US:QQQ") -> EtfAnalysisContext:
         benchmark_index="NDX",
         factors={"ma5": 100, "ma10": 99, "ma20": 98},
         latest_quote=EtfRealtimeQuote(
-            symbol=symbol, price=101, quote_time=datetime.utcnow(), source="mock"
+            symbol=symbol, price=101, quote_time=utc_now_naive(), source="mock"
         ),
         latest_bar=EtfDailyBar(
             symbol=symbol,

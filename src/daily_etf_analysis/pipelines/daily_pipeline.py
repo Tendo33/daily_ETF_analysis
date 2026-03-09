@@ -68,6 +68,7 @@ class DailyPipeline:
         task_id: str,
         symbols: list[str] | None = None,
         force_refresh: bool = False,
+        skip_market_guard: bool = False,
     ) -> list[EtfAnalysisResult]:
         normalized_symbols = [
             normalize_symbol(s) for s in (symbols or self.settings.etf_list)
@@ -75,8 +76,10 @@ class DailyPipeline:
         results: list[EtfAnalysisResult] = []
         for symbol in normalized_symbols:
             market, code = split_symbol(symbol)
-            if market.value.lower() in {"cn", "hk", "us"} and not is_market_open_today(
-                market
+            if (
+                not skip_market_guard
+                and market.value.lower() in {"cn", "hk", "us"}
+                and not is_market_open_today(market)
             ):
                 logger.info(
                     "Skipping %s because market %s is closed today",

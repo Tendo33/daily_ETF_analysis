@@ -25,7 +25,9 @@ class _FakeService:
             updated_at=datetime.now(UTC),
         )
 
-    def run_analysis(self, symbols=None, force_refresh=False):  # type: ignore[no-untyped-def]
+    def run_analysis(  # type: ignore[no-untyped-def]
+        self, symbols=None, force_refresh=False, skip_market_guard=False
+    ):
         self.task.symbols = symbols or self.task.symbols
         return self.task
 

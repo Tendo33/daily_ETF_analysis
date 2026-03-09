@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     EtfDailyBar,
     EtfRealtimeQuote,
@@ -82,6 +83,6 @@ class EfinanceProvider(MarketDataProvider):
             turnover=float(r.get("换手率", 0)) if r.get("换手率") is not None else None,
             volume=float(r.get("成交量", 0)) if r.get("成交量") is not None else None,
             amount=float(r.get("成交额", 0)) if r.get("成交额") is not None else None,
-            quote_time=datetime.utcnow(),
+            quote_time=utc_now_naive(),
             source=self.name,
         )

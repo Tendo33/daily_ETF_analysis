@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
     EtfDailyBar,
     EtfRealtimeQuote,
@@ -105,7 +106,7 @@ class PytdxProvider(MarketDataProvider):
                 amount=float(quote.get("amount", 0))
                 if quote.get("amount") is not None
                 else None,
-                quote_time=datetime.utcnow(),
+                quote_time=utc_now_naive(),
                 source=self.name,
             )
         finally:

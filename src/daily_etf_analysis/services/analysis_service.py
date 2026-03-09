@@ -28,12 +28,19 @@ class AnalysisService:
         )
 
     def run_analysis(
-        self, symbols: list[str] | None = None, force_refresh: bool = False
+        self,
+        symbols: list[str] | None = None,
+        force_refresh: bool = False,
+        skip_market_guard: bool = False,
     ) -> AnalysisTask:
         target_symbols = [
             normalize_symbol(s) for s in (symbols or self.settings.etf_list)
         ]
-        return self.task_manager.submit(target_symbols, force_refresh=force_refresh)
+        return self.task_manager.submit(
+            target_symbols,
+            force_refresh=force_refresh,
+            skip_market_guard=skip_market_guard,
+        )
 
     def list_tasks(self, limit: int = 50) -> list[AnalysisTask]:
         return self.task_manager.list_tasks(limit=limit)
