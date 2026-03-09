@@ -1,46 +1,163 @@
-# Python Template
+# daily_ETF_analysis
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+面向 A 股 / 港股 / 美股大盘 ETF 的智能分析系统。  
+V1 目标是稳定产出结构化分析结果（不是只生成文案），并通过 API 提供任务查询与日报检索。
 
-一个面向 Python 3.10+ 的现代化工具库模板：
-- `uv` 管理依赖
-- `ruff` 负责 lint/format
-- `mypy` 类型检查
-- `pytest` 测试与覆盖率
+## 核心能力
 
-内置内容聚焦在“开箱可用的基础工程能力”：
-- 配置管理（`pydantic-settings`）
-- 日志（`loguru`）
-- 文件 / JSON / 日期时间工具
-- 装饰器、上下文、通用工具函数
-- 可直接发布的打包与 CI 质量门禁
-- Tag 驱动的 GitHub Release 自动发布（支持模型生成 release message）
+- 三地市场 ETF 统一标识：`<MARKET>:<CODE>`，例如 `CN:159659`、`US:QQQ`、`HK:02800`
+- 行情多源容错：`efinance` / `akshare` / `yfinance` 自动 failover
+- 新闻增强：Tavily（多 key、缓存、时效过滤）
+- LLM 决策输出：`score/trend/action/confidence/risk_alerts/summary/key_points/model_used`
+- 任务化执行：`pending -> running -> completed | failed`
+- 持久化：SQLite + SQLAlchemy + Alembic
+
+## 项目结构
+
+```text
+src/daily_etf_analysis/
+├── api/               # FastAPI 路由
+├── config/            # Settings 与配置优先级解析
+├── core/              # 交易日判断
+├── domain/            # ETF 领域模型与 symbol 规范
+├── llm/               # EtfAnalyzer（LiteLLM Router + fallback）
+├── pipelines/         # DailyPipeline 编排
+├── providers/         # 行情/新闻 Provider
+├── repositories/      # 数据库读写
+├── scheduler/         # 定时调度
+└── services/          # TaskManager / AnalysisService / 因子计算
+```
 
 ## 快速开始
 
-### 1) 安装依赖
+1. 安装依赖
 
 ```bash
 uv sync --all-extras
 ```
 
-### 2) 初始化环境变量
+2. 准备环境变量
 
 ```bash
 cp .env.example .env
 ```
 
-默认配置最小化：
+3. 最小必填配置（建议先保证可跑通）
 
 ```env
-ENVIRONMENT=development
-LOG_LEVEL=INFO
-LOG_FILE=logs/app.log
+ETF_LIST=CN:159659,US:QQQ,HK:02800
+INDEX_PROXY_MAP={"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}
+DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
+LLM_CHANNELS=aihubmix
+LLM_AIHUBMIX_BASE_URL=https://aihubmix.com/v1
+LLM_AIHUBMIX_API_KEY=sk-xxxx
+LLM_AIHUBMIX_MODELS=gpt-4o-mini
+TAVILY_API_KEYS=tvly-xxxx
 ```
 
-### 3) 运行质量检查
+4. 启动 API
+
+```bash
+uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
+```
+
+5. 验证服务
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+OpenAPI 文档：
+- `http://127.0.0.1:8000/docs`
+- `http://127.0.0.1:8000/redoc`
+
+## LLM 配置优先级
+
+当前实现采用三层优先级（由高到低）：
+
+1. `LITELLM_CONFIG`（YAML `model_list`）
+2. `LLM_CHANNELS`（渠道模式）
+3. legacy keys（`OPENAI_*`, `GEMINI_*`, `ANTHROPIC_*`, `DEEPSEEK_*`）
+
+当主模型失败时，会按 fallback 列表继续尝试；全失败时返回中性降级结果：
+- `success=false`
+- `score=50`
+- `trend=neutral`
+- `action=hold`
+
+## API 快速示例
+
+启动分析任务：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analysis/run \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"],"force_refresh":false}'
+```
+
+查询任务列表：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/analysis/tasks
+```
+
+查询单任务状态：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/analysis/tasks/<task_id>
+```
+
+查询单 ETF 实时行情：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/etfs/US:QQQ/quote
+```
+
+查询日报：
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/reports/daily?date=2026-03-09&market=all"
+```
+
+## API 端点清单
+
+- `POST /api/v1/analysis/run`
+- `GET /api/v1/analysis/tasks`
+- `GET /api/v1/analysis/tasks/{task_id}`
+- `GET /api/v1/etfs`
+- `PUT /api/v1/etfs`
+- `GET /api/v1/index-mappings`
+- `PUT /api/v1/index-mappings`
+- `GET /api/v1/etfs/{symbol}/quote`
+- `GET /api/v1/etfs/{symbol}/history?days=120`
+- `GET /api/v1/reports/daily?date=YYYY-MM-DD&market=all|cn|hk|us`
+- `GET /api/health`
+
+## 数据库与迁移
+
+- 默认使用 SQLite，路径来自 `DATABASE_URL`（默认 `./data/daily_etf_analysis.db`）
+- 代码首次运行会自动建表（`SQLAlchemy metadata.create_all`）
+- 若你希望按迁移管理 schema，可使用 Alembic：
+
+```bash
+uv run alembic upgrade head
+```
+
+## 配置检查与连通性自检
+
+```bash
+uv run python scripts/test_env.py --config
+uv run python scripts/test_env.py --fetch --symbol CN:159659
+uv run python scripts/test_env.py --llm
+```
+
+## 定时任务说明
+
+- 调度器配置字段：`SCHEDULE_ENABLED`, `SCHEDULE_CRON_CN/HK/US`
+- 当前默认不自动启动（`SCHEDULE_ENABLED=false`）
+- 若需要常驻调度，建议在单独进程中初始化 `EtfScheduler` 并调用 `start()`
+
+## 质量门禁
 
 ```bash
 uv run ruff check src tests scripts
@@ -49,147 +166,9 @@ uv run mypy src
 uv run pytest
 ```
 
-## 用这个 Template 创建新项目
+## 当前默认与边界
 
-### 1) 复制模板仓库
-
-```bash
-git clone https://github.com/Tendo33/daily-etf-analysis.git my-new-project
-cd my-new-project
-```
-
-### 2) 重命名包名（建议第一步就做）
-
-```bash
-# 先预览
-python scripts/rename_package.py my_new_project --dry-run
-
-# 再执行
-python scripts/rename_package.py my_new_project
-```
-
-### 3) 更新项目信息
-
-建议至少更新：
-- `pyproject.toml`：`name`、`description`、`authors`、`urls`
-- `src/<your_package>/__init__.py`：`__version__`
-- `README.md`：项目名与示例导入路径
-
-如需统一改版本号：
-
-```bash
-python scripts/update_version.py 0.2.0
-```
-
-### 4) 验证模板改名后可用
-
-```bash
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
-uv run mypy src
-uv run pytest
-```
-
-### 5) （可选）启用提交前检查
-
-```bash
-python scripts/setup_pre_commit.py
-```
-
-## 导入约定
-
-### Canonical 导入（推荐）
-
-```python
-from daily_etf_analysis.config.settings import get_settings
-from daily_etf_analysis.observability.log_config import get_logger, setup_logging
-from daily_etf_analysis.utils import read_json, read_text_file, write_json, write_text_file
-```
-
-### 高级能力请从子模块导入
-
-```python
-from daily_etf_analysis.utils.decorator_utils import retry_decorator
-from daily_etf_analysis.utils.common_utils import chunk_list
-from daily_etf_analysis.core.context import Context
-```
-
-## 常用示例
-
-### 日志
-
-```python
-from daily_etf_analysis.observability.log_config import get_logger, setup_logging
-
-setup_logging(level="INFO", log_file="logs/app.log")
-logger = get_logger(__name__)
-logger.info("service started")
-```
-
-### 配置
-
-```python
-from daily_etf_analysis.config.settings import get_settings
-
-settings = get_settings()
-print(settings.environment)
-print(settings.log_level)
-```
-
-### 文件与 JSON
-
-```python
-from daily_etf_analysis.utils import read_json, write_json, read_text_file, write_text_file
-
-write_text_file("hello", "data/hello.txt")
-content = read_text_file("data/hello.txt")
-
-write_json({"ok": True}, "data/config.json")
-config = read_json("data/config.json", default={})
-```
-
-## 项目结构
-
-```text
-daily-etf-analysis/
-├── src/daily_etf_analysis/
-│   ├── config/
-│   ├── contracts/
-│   ├── core/
-│   ├── models/
-│   ├── observability/
-│   └── utils/
-├── tests/
-├── scripts/
-├── doc/
-├── pyproject.toml
-└── README.md
-```
-
-## 维护脚本
-
-- `python scripts/rename_package.py my_new_project`
-- `python scripts/setup_pre_commit.py`
-- `python scripts/update_version.py 0.2.0`
-- `python scripts/generate_release_notes.py --tag v0.2.0 --output .github/release-notes.md`
-- `uv run python scripts/run_vulture.py --min-confidence 80`
-
-## Release 自动发布
-
-- 推送 tag（如 `v0.3.0`）会触发 `/Users/simonsun/github_project/daily-etf-analysis/.github/workflows/release.yml`。
-- Workflow 会生成 release notes，并执行“存在则更新，不存在则创建”。
-- 模型相关配置统一走 CI 环境变量（如 `OPENAI_API_KEY`、`RELEASE_NOTES_MODEL`、`OPENAI_BASE_URL`）。
-- 若未配置模型密钥或模型调用失败，会自动回退到 deterministic 的非模型说明，不会阻塞发布。
-
-## 文档
-
-- `doc/SETTINGS_GUIDE.md`
-- `doc/MODELS_GUIDE.md`
-- `doc/SDK_USAGE.md`
-- `doc/PRE_COMMIT_GUIDE.md`
-- `doc/AI_TOOLING_STANDARDS.md`
-- `doc/BACKEND_STANDARDS.md`
-
-## 许可证
-
-MIT，见 `LICENSE`。
+- 默认数据库：SQLite
+- 默认新闻源：Tavily（其他新闻源接口已预留）
+- V1 不含前端界面，仅提供 FastAPI + JSON 报告接口
+- 部分时间字段仍使用 `datetime.utcnow()`，测试会出现 deprecation warning（不影响运行）

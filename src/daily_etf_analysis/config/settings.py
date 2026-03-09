@@ -1,160 +1,369 @@
-"""Settings module using Pydantic for configuration management.
+from __future__ import annotations
 
-This is a lightweight template for managing application settings.
-这是一个轻量级的应用配置管理模板。
-
-Features / 特性:
-- Load from environment variables and .env file / 从环境变量和.env文件加载
-- Type-safe with Pydantic validation / 使用Pydantic进行类型安全验证
-- Singleton pattern / 单例模式
-- Easy to extend / 易于扩展
-
-Usage / 使用方法:
-    from daily_etf_analysis.config.settings import get_settings
-
-    settings = get_settings()
-    print(settings.environment)
-    print(settings.log_level)
-
-How to add your own settings / 如何添加自己的配置项:
-    1. Add field to Settings class / 在Settings类中添加字段
-    2. Add corresponding env var to .env.example / 在.env.example中添加对应的环境变量
-    3. Use Field() for validation and defaults / 使用Field()进行验证和设置默认值
-
-    Example / 示例:
-        database_url: str = Field(
-            default="sqlite:///./app.db",
-            description="Database connection URL"
-        )
-"""
-
+import json
+import os
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field, field_validator
+from dotenv import load_dotenv
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+load_dotenv(override=False)
+
+
+@dataclass(slots=True)
+class ConfigIssue:
+    severity: str
+    message: str
+    field: str = ""
+
+
+def _parse_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 class Settings(BaseSettings):
-    """Application settings / 应用配置.
+    environment: str = Field(default="development")
+    log_level: str = Field(default="INFO")
+    log_file: str = Field(default="logs/app.log")
 
-    Add your own configuration fields here following the examples below.
-    参考下面的示例添加你自己的配置字段。
-
-    Configuration priority (highest to lowest) / 配置优先级（从高到低）:
-    1. Environment variables / 环境变量
-    2. .env file / .env文件
-    3. Default values / 默认值
-    """
-
-    # Basic runtime settings / 基础运行时配置
-    environment: str = Field(
-        default="development",
-        description="Environment: development/staging/production / 运行环境",
+    etf_list: list[str] = Field(
+        default_factory=lambda: ["CN:159659", "US:QQQ", "HK:02800"]
     )
-
-    # Logging settings / 日志配置
-    log_level: str = Field(default="INFO", description="Log level / 日志级别")
-    log_file: str = Field(
-        default="logs/app.log", description="Log file path / 日志文件路径"
+    index_proxy_map: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "NDX": ["US:QQQ", "CN:159659"],
+            "SPX": ["US:SPY", "CN:513500"],
+            "HSI": ["HK:02800", "CN:159920"],
+        }
     )
+    markets_enabled: list[str] = Field(default_factory=lambda: ["cn", "hk", "us"])
+    database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
 
-    # Example: Add your own settings here / 示例：在这里添加你自己的配置
-    # database_url: str = Field(default="sqlite:///./app.db")
-    # api_key: str = Field(default="")
-    # max_connections: int = Field(default=10, ge=1, le=100)
+    litellm_model: str = Field(default="")
+    litellm_fallback_models: list[str] = Field(default_factory=list)
+    litellm_config: str | None = Field(default=None)
+    llm_channels: str = Field(default="")
+    llm_model_list: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
+
+    gemini_api_key: str | None = Field(default=None)
+    gemini_api_keys: list[str] = Field(default_factory=list)
+    anthropic_api_key: str | None = Field(default=None)
+    anthropic_api_keys: list[str] = Field(default_factory=list)
+    openai_api_key: str | None = Field(default=None)
+    openai_api_keys: list[str] = Field(default_factory=list)
+    deepseek_api_key: str | None = Field(default=None)
+    deepseek_api_keys: list[str] = Field(default_factory=list)
+    openai_base_url: str | None = Field(default=None)
+
+    llm_temperature: float = Field(default=0.7)
+    llm_max_tokens: int = Field(default=4096)
+    llm_timeout_seconds: int = Field(default=60)
+
+    tavily_api_keys: list[str] = Field(default_factory=list)
+    news_max_age_days: int = Field(default=3)
+    news_provider_priority: list[str] = Field(default_factory=lambda: ["tavily"])
+
+    realtime_source_priority: list[str] = Field(
+        default_factory=lambda: ["efinance", "akshare", "yfinance"]
+    )
+    schedule_enabled: bool = Field(default=False)
+    schedule_cron_cn: str = Field(default="0 30 15 * * 1-5")
+    schedule_cron_hk: str = Field(default="0 10 16 * * 1-5")
+    schedule_cron_us: str = Field(default="0 10 22 * * 1-5")
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        env_nested_delimiter="_",
         case_sensitive=False,
-        extra="ignore",  # Allow extra fields for flexibility / 允许额外字段以提高灵活性
+        extra="ignore",
     )
 
     @field_validator("environment")
     @classmethod
-    def validate_environment(cls, v: str) -> str:
-        """Validate environment value / 验证环境值."""
-        allowed = ["development", "staging", "production"]
-        if v not in allowed:
-            raise ValueError(f"Environment must be one of {allowed}")
-        return v
+    def validate_environment(cls, value: str) -> str:
+        allowed = {"development", "staging", "production"}
+        if value not in allowed:
+            raise ValueError(f"Environment must be one of {sorted(allowed)}")
+        return value
 
     @field_validator("log_level")
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Validate log level / 验证日志级别."""
-        allowed = ["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"]
-        v_upper = v.upper()
-        if v_upper not in allowed:
-            raise ValueError(f"Log level must be one of {allowed}")
-        return v_upper
+    def validate_log_level(cls, value: str) -> str:
+        allowed = {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
+        val = value.upper()
+        if val not in allowed:
+            raise ValueError(f"Log level must be one of {sorted(allowed)}")
+        return val
 
-    # Add your own validators here / 在这里添加你自己的验证器
-    # Example:
-    # @field_validator("api_key")
-    # @classmethod
-    # def validate_api_key(cls, v: str) -> str:
-    #     if not v and cls.environment == "production":
-    #         raise ValueError("API key is required in production")
-    #     return v
+    @field_validator(
+        "etf_list",
+        "markets_enabled",
+        "litellm_fallback_models",
+        "gemini_api_keys",
+        "anthropic_api_keys",
+        "openai_api_keys",
+        "deepseek_api_keys",
+        "tavily_api_keys",
+        "news_provider_priority",
+        "realtime_source_priority",
+        mode="before",
+    )
+    @classmethod
+    def parse_list_values(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return _parse_csv(value)
+        raise ValueError("List value must be list or comma-separated string")
+
+    @field_validator("index_proxy_map", mode="before")
+    @classmethod
+    def parse_index_proxy_map(cls, value: Any) -> dict[str, list[str]]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {
+                str(k).upper(): [str(x).upper() for x in v] for k, v in value.items()
+            }
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {}
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise ValueError("INDEX_PROXY_MAP must be a JSON object")
+            return {
+                str(k).upper(): [
+                    str(x).upper() for x in (v if isinstance(v, list) else [])
+                ]
+                for k, v in parsed.items()
+            }
+        raise ValueError("Invalid INDEX_PROXY_MAP value")
+
+    @model_validator(mode="after")
+    def finalize_settings(self) -> Settings:
+        self._normalize_key_lists()
+        self._resolve_llm_model_list()
+        self._infer_models_from_channels()
+        return self
+
+    def _normalize_key_lists(self) -> None:
+        if not self.gemini_api_keys and self.gemini_api_key:
+            self.gemini_api_keys = [self.gemini_api_key]
+        if not self.anthropic_api_keys and self.anthropic_api_key:
+            self.anthropic_api_keys = [self.anthropic_api_key]
+        if not self.openai_api_keys and self.openai_api_key:
+            self.openai_api_keys = [self.openai_api_key]
+        if not self.deepseek_api_keys and self.deepseek_api_key:
+            self.deepseek_api_keys = [self.deepseek_api_key]
+
+    def _resolve_llm_model_list(self) -> None:
+        model_list: list[dict[str, Any]] = []
+        if self.litellm_config:
+            model_list = self._parse_litellm_yaml(self.litellm_config)
+        if not model_list and self.llm_channels:
+            channels = self._parse_llm_channels(self.llm_channels)
+            model_list = self._channels_to_model_list(channels)
+        if not model_list:
+            model_list = self._legacy_keys_to_model_list()
+        self.llm_model_list = model_list
+
+    def _infer_models_from_channels(self) -> None:
+        if not self.litellm_model and self.llm_model_list:
+            self.litellm_model = self.llm_model_list[0]["litellm_params"]["model"]
+
+        if not self.litellm_fallback_models and self.llm_model_list:
+            seen = {self.litellm_model}
+            fallbacks: list[str] = []
+            for item in self.llm_model_list:
+                model = item["litellm_params"]["model"]
+                if model not in seen:
+                    seen.add(model)
+                    fallbacks.append(model)
+            self.litellm_fallback_models = fallbacks
+
+    def _parse_litellm_yaml(self, config_path: str) -> list[dict[str, Any]]:
+        try:
+            import yaml
+        except ImportError:
+            return []
+
+        path = Path(config_path)
+        if not path.is_absolute():
+            path = self.get_project_root() / path
+        if not path.exists():
+            return []
+
+        with path.open(encoding="utf-8") as f:
+            content = yaml.safe_load(f) or {}
+        model_list = content.get("model_list", [])
+        if not isinstance(model_list, list):
+            return []
+        for item in model_list:
+            params = item.get("litellm_params", {})
+            for key, value in list(params.items()):
+                if isinstance(value, str) and value.startswith("os.environ/"):
+                    env_name = value.split("/", 1)[1]
+                    params[key] = os.getenv(env_name, "")
+        return model_list
+
+    def _parse_llm_channels(self, channels_raw: str) -> list[dict[str, Any]]:
+        channels: list[dict[str, Any]] = []
+        for channel_name in _parse_csv(channels_raw):
+            upper = channel_name.upper()
+            base_url = os.getenv(f"LLM_{upper}_BASE_URL", "").strip() or None
+
+            keys = _parse_csv(os.getenv(f"LLM_{upper}_API_KEYS", ""))
+            if not keys:
+                single_key = os.getenv(f"LLM_{upper}_API_KEY", "").strip()
+                if single_key:
+                    keys = [single_key]
+
+            models = _parse_csv(os.getenv(f"LLM_{upper}_MODELS", ""))
+            if base_url:
+                models = [f"openai/{m}" if "/" not in m else m for m in models]
+
+            if not keys or not models:
+                continue
+
+            channels.append(
+                {
+                    "name": channel_name.lower(),
+                    "base_url": base_url,
+                    "api_keys": keys,
+                    "models": models,
+                }
+            )
+        return channels
+
+    def _channels_to_model_list(
+        self, channels: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        model_list: list[dict[str, Any]] = []
+        for channel in channels:
+            for model_name in channel["models"]:
+                for api_key in channel["api_keys"]:
+                    params: dict[str, Any] = {"model": model_name, "api_key": api_key}
+                    if channel["base_url"]:
+                        params["api_base"] = channel["base_url"]
+                    model_list.append(
+                        {"model_name": model_name, "litellm_params": params}
+                    )
+        return model_list
+
+    def _legacy_keys_to_model_list(self) -> list[dict[str, Any]]:
+        model_list: list[dict[str, Any]] = []
+        for key in self.gemini_api_keys:
+            model_list.append(
+                {
+                    "model_name": "__legacy_gemini__",
+                    "litellm_params": {
+                        "model": "gemini/gemini-2.0-flash",
+                        "api_key": key,
+                    },
+                }
+            )
+        for key in self.anthropic_api_keys:
+            model_list.append(
+                {
+                    "model_name": "__legacy_anthropic__",
+                    "litellm_params": {
+                        "model": "anthropic/claude-3-5-sonnet-20241022",
+                        "api_key": key,
+                    },
+                }
+            )
+        for key in self.openai_api_keys:
+            params: dict[str, Any] = {"model": "openai/gpt-4o-mini", "api_key": key}
+            if self.openai_base_url:
+                params["api_base"] = self.openai_base_url
+            model_list.append(
+                {"model_name": "__legacy_openai__", "litellm_params": params}
+            )
+        for key in self.deepseek_api_keys:
+            model_list.append(
+                {
+                    "model_name": "__legacy_deepseek__",
+                    "litellm_params": {
+                        "model": "deepseek/deepseek-chat",
+                        "api_key": key,
+                    },
+                }
+            )
+        return model_list
+
+    def validate_structured(self) -> list[ConfigIssue]:
+        issues: list[ConfigIssue] = []
+        if not self.etf_list:
+            issues.append(ConfigIssue("error", "ETF_LIST is empty.", "ETF_LIST"))
+        if not self.llm_model_list:
+            issues.append(
+                ConfigIssue(
+                    "error",
+                    "No LLM configured. Set LITELLM_CONFIG, LLM_CHANNELS, or API keys.",
+                    "LITELLM_CONFIG",
+                )
+            )
+        if not self.litellm_model:
+            issues.append(
+                ConfigIssue(
+                    "warning",
+                    "LITELLM_MODEL is empty. First model from channels/legacy will be used.",
+                    "LITELLM_MODEL",
+                )
+            )
+        if not self.tavily_api_keys:
+            issues.append(
+                ConfigIssue(
+                    "warning",
+                    "TAVILY_API_KEYS not configured. News context will be unavailable.",
+                    "TAVILY_API_KEYS",
+                )
+            )
+        return issues
 
     def get_project_root(self) -> Path:
-        """Get project root directory / 获取项目根目录.
-
-        Returns:
-            Path to project root / 项目根目录路径
-        """
-        # Assuming this file is in src/{package}/config/
-        current_file = Path(__file__).resolve()
-        # Go up: settings.py -> config -> package -> src -> project_root
-        return current_file.parent.parent.parent.parent
+        return Path(__file__).resolve().parent.parent.parent.parent
 
     def get_log_file_path(self) -> Path:
-        """Get absolute path to log file / 获取日志文件的绝对路径.
-
-        Returns:
-            Absolute path to log file / 日志文件的绝对路径
-        """
-        log_path = Path(self.log_file)
-        if log_path.is_absolute():
-            return log_path
-        return self.get_project_root() / log_path
+        path = Path(self.log_file)
+        if path.is_absolute():
+            return path
+        return self.get_project_root() / path
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get global settings instance (singleton) / 获取全局配置实例（单例）.
-
-    This function is cached to ensure only one Settings instance exists.
-    该函数使用缓存确保只存在一个Settings实例。
-
-    Returns:
-        Settings instance / 配置实例
-
-    Example:
-        >>> from daily_etf_analysis.config.settings import get_settings
-        >>> settings = get_settings()
-        >>> print(settings.environment)
-        development
-    """
     return Settings()
 
 
 def reload_settings(env_file: Path | None = None) -> Settings:
-    """Reload settings from environment/file / 重新加载配置.
-
-    Useful for testing or when configuration changes at runtime.
-    在测试或运行时配置更改时很有用。
-
-    Args:
-        env_file: Optional path to .env file / 可选的.env文件路径
-
-    Returns:
-        New Settings instance / 新的配置实例
-    """
     get_settings.cache_clear()
     if env_file is None:
         return get_settings()
     return Settings(_env_file=str(env_file))  # type: ignore[call-arg]
+
+
+def get_api_keys_for_model(model: str, settings: Settings) -> list[str]:
+    if model.startswith("gemini/") or model.startswith("vertex_ai/"):
+        return settings.gemini_api_keys
+    if model.startswith("anthropic/"):
+        return settings.anthropic_api_keys
+    if model.startswith("deepseek/"):
+        return settings.deepseek_api_keys
+    if model.startswith("openai/") or "/" not in model:
+        return settings.openai_api_keys
+    return []
+
+
+def extra_litellm_params(model: str, settings: Settings) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if model.startswith("openai/") and settings.openai_base_url:
+        params["api_base"] = settings.openai_base_url
+    return params
