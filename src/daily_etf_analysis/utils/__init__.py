@@ -1,11 +1,11 @@
 """Utilities package public API.
 
 This module intentionally exports only the stable core surface.
-Use submodules (e.g. ``python_template.utils.decorator_utils``) for advanced APIs.
+Use submodules (e.g. ``daily_etf_analysis.utils.decorator_utils``) for advanced APIs.
 """
 
-from python_template.config.settings import Settings, get_settings, reload_settings
-from python_template.observability.log_config import (
+from daily_etf_analysis.config.settings import Settings, get_settings, reload_settings
+from daily_etf_analysis.observability.log_config import (
     configure_json_logging,
     get_logger,
     setup_logging,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from python_template.config.settings import get_settings, reload_settings
+from daily_etf_analysis.config.settings import get_settings, reload_settings
 
 
 def test_get_settings_returns_cached_instance() -> None:

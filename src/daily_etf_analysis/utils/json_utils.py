@@ -8,8 +8,8 @@ from typing import Any
 
 import aiofiles
 
-from python_template.observability.log_config import get_logger
-from python_template.utils.decorator_utils import timing
+from daily_etf_analysis.observability.log_config import get_logger
+from daily_etf_analysis.utils.decorator_utils import timing
 
 logger = get_logger(__name__)
 

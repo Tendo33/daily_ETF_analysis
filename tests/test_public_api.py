@@ -4,9 +4,9 @@ import importlib
 
 
 def test_canonical_imports() -> None:
-    from python_template.config.settings import get_settings
-    from python_template.observability.log_config import get_logger, setup_logging
-    from python_template.utils import (
+    from daily_etf_analysis.config.settings import get_settings
+    from daily_etf_analysis.observability.log_config import get_logger, setup_logging
+    from daily_etf_analysis.utils import (
         read_json,
         read_text_file,
         write_json,
@@ -23,9 +23,9 @@ def test_canonical_imports() -> None:
 
 
 def test_advanced_imports() -> None:
-    from python_template.core.context import Context
-    from python_template.utils.common_utils import chunk_list
-    from python_template.utils.decorator_utils import retry_decorator
+    from daily_etf_analysis.core.context import Context
+    from daily_etf_analysis.utils.common_utils import chunk_list
+    from daily_etf_analysis.utils.decorator_utils import retry_decorator
 
     assert Context is not None
     assert callable(chunk_list)
@@ -34,24 +34,24 @@ def test_advanced_imports() -> None:
 
 def test_public_modules_importable() -> None:
     modules = [
-        "python_template",
-        "python_template.config",
-        "python_template.config.settings",
-        "python_template.observability",
-        "python_template.observability.log_config",
-        "python_template.utils",
-        "python_template.utils.file_utils",
-        "python_template.utils.json_utils",
-        "python_template.utils.date_utils",
-        "python_template.utils.common_utils",
-        "python_template.utils.decorator_utils",
-        "python_template.core",
-        "python_template.core.context",
-        "python_template.contracts",
-        "python_template.contracts.protocols",
-        "python_template.models",
-        "python_template.models.base",
-        "python_template.models.examples",
+        "daily_etf_analysis",
+        "daily_etf_analysis.config",
+        "daily_etf_analysis.config.settings",
+        "daily_etf_analysis.observability",
+        "daily_etf_analysis.observability.log_config",
+        "daily_etf_analysis.utils",
+        "daily_etf_analysis.utils.file_utils",
+        "daily_etf_analysis.utils.json_utils",
+        "daily_etf_analysis.utils.date_utils",
+        "daily_etf_analysis.utils.common_utils",
+        "daily_etf_analysis.utils.decorator_utils",
+        "daily_etf_analysis.core",
+        "daily_etf_analysis.core.context",
+        "daily_etf_analysis.contracts",
+        "daily_etf_analysis.contracts.protocols",
+        "daily_etf_analysis.models",
+        "daily_etf_analysis.models.base",
+        "daily_etf_analysis.models.examples",
     ]
 
     for module in modules:

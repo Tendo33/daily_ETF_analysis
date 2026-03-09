@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "python-template"
+name = "daily-etf-analysis"
 version = "0.2.0"
 description = "A modern Python project template with loguru, ruff, and uv"
 readme = "README.md"
@@ -51,11 +51,11 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Tendo33/python-template"
-Repository = "https://github.com/Tendo33/python-template"
-Documentation = "https://github.com/Tendo33/python-template/tree/main/doc"
-Changelog = "https://github.com/Tendo33/python-template/blob/main/CHANGELOG.md"
-"Bug Tracker" = "https://github.com/Tendo33/python-template/issues"
+Homepage = "https://github.com/Tendo33/daily-etf-analysis"
+Repository = "https://github.com/Tendo33/daily-etf-analysis"
+Documentation = "https://github.com/Tendo33/daily-etf-analysis/tree/main/doc"
+Changelog = "https://github.com/Tendo33/daily-etf-analysis/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/Tendo33/daily-etf-analysis/issues"
 
 # Ruff configuration
 [tool.ruff]
@@ -149,7 +149,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.ruff.lint.isort]
-known-first-party = ["python_template"]
+known-first-party = ["daily_etf_analysis"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -206,7 +206,7 @@ skip_covered = false
 
 # Hatch configuration for building
 [tool.hatch.version]
-path = "src/python_template/__init__.py"
+path = "src/daily_etf_analysis/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -230,4 +230,4 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/python_template"]
+packages = ["src/daily_etf_analysis"]
