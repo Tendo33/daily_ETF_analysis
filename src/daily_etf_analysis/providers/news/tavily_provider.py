@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.providers.news.base import NewsItem, NewsProvider
@@ -45,7 +45,7 @@ class TavilyProvider(NewsProvider):
             include_raw_content=False,
             days=max(1, days),
         )
-        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
         items: list[NewsItem] = []
         for item in response.get("results", []):
             published_raw = item.get("published_date")
@@ -71,7 +71,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
+            return parsed.replace(tzinfo=UTC)
         return parsed
     except ValueError:
         return None

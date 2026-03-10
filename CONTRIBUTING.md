@@ -53,7 +53,7 @@ uv run mypy src
 ### 类型提示
 
 - 所有函数必须包含类型提示
-- 使用 Python 3.10+ 的类型语法 (如 `list[str]` 而非 `List[str]`)
+- 使用 Python 3.11+ 的类型语法 (如 `list[str]` 而非 `List[str]`)
 
 ### 文档字符串
 

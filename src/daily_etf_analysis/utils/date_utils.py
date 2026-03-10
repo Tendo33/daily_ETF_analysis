@@ -4,7 +4,7 @@
 """
 
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from daily_etf_analysis.observability.log_config import get_logger
 
@@ -21,7 +21,7 @@ def get_timestamp(include_timezone: bool = True) -> str:
         ISO 格式的时间戳字符串
     """
     if include_timezone:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
     else:
         return datetime.now().isoformat()
 
@@ -98,7 +98,7 @@ def get_current_date(
     Returns:
         格式化后的日期字符串
     """
-    now = datetime.now(timezone.utc) if use_utc else datetime.now()
+    now = datetime.now(UTC) if use_utc else datetime.now()
     return now.strftime(format_str)
 
 
@@ -115,7 +115,7 @@ def get_current_time(
     Returns:
         格式化后的时间字符串
     """
-    now = datetime.now(timezone.utc) if use_utc else datetime.now()
+    now = datetime.now(UTC) if use_utc else datetime.now()
     return now.strftime(format_str)
 
 

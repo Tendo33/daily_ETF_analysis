@@ -4,7 +4,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 from daily_etf_analysis.config.settings import Settings
@@ -21,7 +21,7 @@ class ProviderCallStats:
     retry_count: int = 0
     circuit_state: str = "closed"
     last_error: str | None = None
-    last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -95,26 +95,26 @@ class ProviderStatsRegistry:
         with self._lock:
             stat = self._get_or_create(provider, operation)
             stat.success_count += 1
-            stat.last_updated = datetime.now(timezone.utc)
+            stat.last_updated = datetime.now(UTC)
 
     def record_failure(self, provider: str, operation: str, error: str) -> None:
         with self._lock:
             stat = self._get_or_create(provider, operation)
             stat.failure_count += 1
             stat.last_error = error
-            stat.last_updated = datetime.now(timezone.utc)
+            stat.last_updated = datetime.now(UTC)
 
     def record_retry(self, provider: str, operation: str) -> None:
         with self._lock:
             stat = self._get_or_create(provider, operation)
             stat.retry_count += 1
-            stat.last_updated = datetime.now(timezone.utc)
+            stat.last_updated = datetime.now(UTC)
 
     def set_circuit_state(self, provider: str, operation: str, state: str) -> None:
         with self._lock:
             stat = self._get_or_create(provider, operation)
             stat.circuit_state = state
-            stat.last_updated = datetime.now(timezone.utc)
+            stat.last_updated = datetime.now(UTC)
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:

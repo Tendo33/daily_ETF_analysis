@@ -19,13 +19,12 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
 keywords = ["template", "python", "loguru", "ruff", "uv"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "loguru>=0.7.0",
     "python-dotenv>=1.0.0",
@@ -119,8 +118,8 @@ exclude = [
 line-length = 88
 indent-width = 4
 
-# Assume Python 3.10+
-target-version = "py310"
+# Assume Python 3.11+
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
@@ -174,7 +173,7 @@ docstring-code-line-length = "dynamic"
 known-first-party = ["daily_etf_analysis"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 files = ["src"]
 mypy_path = "src"
 warn_unused_configs = true

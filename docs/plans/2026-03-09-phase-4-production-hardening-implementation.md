@@ -16,11 +16,20 @@
 2. 所有迁移已在测试环境验证可重复执行。
 3. 关键写接口鉴权机制已可用（可开关）。
 
+## 当前实现快照（2026-03-10）
+
+- 已有统一入口 `main.py`，支持 `--schedule/--serve/--market-review`。
+- 已完成每日分析 + 日报 + 通知链路（含模板渲染、完整性校验、历史信号对比）。
+- 已支持 Markdown 转图（Telegram/Wechat/Email），Feishu 仍为 Markdown。
+- ETF 大盘复盘已包含基础行业汇总（基于 `INDUSTRY_MAP`）。
+- Provider 熔断/重试与 health API 已具备，缺少系统级指标与告警。
+
 ## Scope 与完成定义
 
 - In Scope:
   - 运行时 SLI/SLO 与告警阈值。
   - 请求链路可追踪（request/task correlation）。
+  - 报告渲染与转图依赖的健康检查（wkhtmltoimage 等）。
   - 数据生命周期治理（保留、归档、清理）。
   - 任务执行可靠性（超时、取消、重试上限、背压）。
   - 灾备能力（备份/恢复脚本 + 演练）。
@@ -70,6 +79,9 @@
   - `analysis_task_total{status=...}`
   - `provider_calls_total{provider,operation,status}`
   - `notification_delivery_total{channel,status}`
+  - `scheduler_runs_total{market,status}`
+  - `report_render_total{mode=template|fallback}`
+  - `md2img_total{channel,status}`
 
 **Step 2: Run test to verify it fails**
 - Run: `uv run pytest tests/test_metrics_endpoint.py -v`
@@ -324,3 +336,4 @@ uv run pytest
 - CI/CD 具备发布门禁与回滚治理。
 - 安全扫描可在本地与 CI 执行。
 - 全量门禁通过并形成可执行运维文档。
+- 行业复盘增强（趋势/风险/推荐权重）已落地并纳入日报输出。

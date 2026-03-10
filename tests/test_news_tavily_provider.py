@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from daily_etf_analysis.config.settings import Settings
@@ -23,7 +23,7 @@ def test_tavily_rotation_and_cache(monkeypatch) -> None:  # type: ignore[no-unty
                         "title": "ETF news",
                         "url": "https://example.com",
                         "content": "market update",
-                        "published_date": datetime.now(timezone.utc).isoformat(),
+                        "published_date": datetime.now(UTC).isoformat(),
                     }
                 ]
             }

@@ -18,7 +18,7 @@ This document defines one shared engineering contract for all AI assistants used
 
 ## Backend Baseline (Python)
 
-- Runtime: Python 3.10+
+- Runtime: Python 3.11+
 - Dependency management: `uv`
 - Lint/format: `ruff`
 - Tests: `pytest`

@@ -4,7 +4,7 @@ This document defines default backend practices for this repository and all conn
 
 ## Default Stack (When Not Specified)
 
-- Language/runtime: Python 3.10+
+- Language/runtime: Python 3.11+
 - API framework: FastAPI
 - Data validation: Pydantic v2
 - Data access: SQLAlchemy
