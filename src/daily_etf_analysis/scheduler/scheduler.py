@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,10 +15,14 @@ logger = logging.getLogger(__name__)
 
 class EtfScheduler:
     def __init__(
-        self, service: AnalysisService, settings: Settings | None = None
+        self,
+        service: AnalysisService,
+        settings: Settings | None = None,
+        on_run: Callable[[str, list[str]], None] | None = None,
     ) -> None:
         self.service = service
         self.settings = settings or get_settings()
+        self._on_run = on_run
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_run_marker: set[str] = set()
@@ -64,7 +69,13 @@ class EtfScheduler:
             s for s in self.settings.etf_list if s.startswith(market.upper() + ":")
         ]
         if symbols:
-            self.service.run_analysis(symbols=symbols, force_refresh=False)
+            if self._on_run is not None:
+                try:
+                    self._on_run(market, symbols)
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Scheduler callback failed: %s", exc)
+            else:
+                self.service.run_analysis(symbols=symbols, force_refresh=False)
             logger.info("Scheduler triggered market=%s symbols=%s", market, symbols)
         self._last_run_marker.add(marker)
 

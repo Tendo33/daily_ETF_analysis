@@ -40,6 +40,7 @@ class Settings(BaseSettings):
             "HSI": ["HK:02800", "CN:159920"],
         }
     )
+    industry_map: dict[str, list[str]] = Field(default_factory=dict)
     markets_enabled: list[str] = Field(default_factory=lambda: ["cn", "hk", "us"])
     database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
 
@@ -96,6 +97,13 @@ class Settings(BaseSettings):
     email_password: str | None = Field(default=None)
     email_from: str | None = Field(default=None)
     email_to: list[str] = Field(default_factory=list)
+    report_templates_dir: str = Field(default="templates")
+    report_renderer_enabled: bool = Field(default=False)
+    report_integrity_enabled: bool = Field(default=True)
+    report_history_compare_n: int = Field(default=0, ge=0, le=60)
+    markdown_to_image_channels: list[str] = Field(default_factory=list)
+    markdown_to_image_max_chars: int = Field(default=15000, ge=1000, le=50000)
+    md2img_engine: str = Field(default="imgkit")
 
     api_auth_enabled: bool = Field(default=False)
     api_admin_token: str | None = Field(default=None)
@@ -129,6 +137,15 @@ class Settings(BaseSettings):
             raise ValueError(f"Log level must be one of {sorted(allowed)}")
         return val
 
+    @field_validator("md2img_engine")
+    @classmethod
+    def validate_md2img_engine(cls, value: str) -> str:
+        allowed = {"imgkit", "markdown-to-file"}
+        val = value.strip().lower()
+        if val not in allowed:
+            raise ValueError(f"md2img_engine must be one of {sorted(allowed)}")
+        return val
+
     @field_validator(
         "etf_list",
         "markets_enabled",
@@ -142,6 +159,7 @@ class Settings(BaseSettings):
         "realtime_source_priority",
         "notify_channels",
         "email_to",
+        "markdown_to_image_channels",
         mode="before",
     )
     @classmethod
@@ -177,6 +195,26 @@ class Settings(BaseSettings):
                 for k, v in parsed.items()
             }
         raise ValueError("Invalid INDEX_PROXY_MAP value")
+
+    @field_validator("industry_map", mode="before")
+    @classmethod
+    def parse_industry_map(cls, value: Any) -> dict[str, list[str]]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {str(k): [str(x).upper() for x in v] for k, v in value.items()}
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {}
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise ValueError("INDUSTRY_MAP must be a JSON object")
+            return {
+                str(k): [str(x).upper() for x in (v if isinstance(v, list) else [])]
+                for k, v in parsed.items()
+            }
+        raise ValueError("Invalid INDUSTRY_MAP value")
 
     @model_validator(mode="after")
     def finalize_settings(self) -> Settings:

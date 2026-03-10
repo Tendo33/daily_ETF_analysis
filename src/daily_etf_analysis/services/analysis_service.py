@@ -129,6 +129,12 @@ class AnalysisService:
         market_filter = None if market in (None, "all") else market
         return self.repository.get_daily_reports(target_date, market=market_filter)
 
+    def get_recent_signals(
+        self, symbols: list[str], limit: int
+    ) -> dict[str, list[dict[str, object]]]:
+        normalized = [normalize_symbol(s) for s in symbols]
+        return self.repository.get_recent_signals(normalized, limit=limit)
+
     def list_history(
         self, page: int = 1, limit: int = 20, symbol: str | None = None
     ) -> dict[str, object]:

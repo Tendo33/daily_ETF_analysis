@@ -11,7 +11,7 @@ from typing import Any
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus
 from daily_etf_analysis.notifications import NotificationManager
 from daily_etf_analysis.reports import render_daily_report_markdown
-from daily_etf_analysis.services import AnalysisService
+from daily_etf_analysis.services import AnalysisService, build_market_review
 
 SKIPPED_STATUS = "skipped"
 
@@ -133,6 +133,15 @@ def run_daily_analysis(
 
     report_date = service.get_task_report_date(task.task_id) or date.today()
     report_rows = service.get_daily_report(report_date, market=report_market)
+    market_review = build_market_review(
+        report_rows, industry_map=service.settings.industry_map
+    )
+    history_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    if service.settings.report_history_compare_n > 0:
+        history_by_symbol = service.get_recent_signals(
+            symbols=selected_symbols,
+            limit=service.settings.report_history_compare_n,
+        )
     report_path = _write_json_report(
         output_dir=output_dir,
         report_date=report_date,
@@ -144,6 +153,8 @@ def run_daily_analysis(
             "market": report_market,
             "symbols": selected_symbols,
             "report_rows": report_rows,
+            "market_review": market_review,
+            "history_by_symbol": history_by_symbol,
         },
     )
     markdown = _build_markdown_summary(
@@ -152,6 +163,8 @@ def run_daily_analysis(
         report_date=report_date,
         market=report_market,
         report_rows=report_rows,
+        market_review=market_review,
+        history_by_symbol=history_by_symbol,
     )
     markdown_path = _write_markdown_report(
         output_dir=output_dir,
@@ -285,6 +298,10 @@ def _build_markdown_summary(
     report_date: date,
     market: str,
     report_rows: list[dict[str, Any]],
+    notes: str | None = None,
+    skip_reason: str | None = None,
+    market_review: dict[str, Any] | None = None,
+    history_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     return render_daily_report_markdown(
         task_id=task_id,
@@ -293,6 +310,10 @@ def _build_markdown_summary(
         market=market,
         report_rows=report_rows,
         disclaimer="For research only; not investment advice.",
+        notes=notes,
+        skip_reason=skip_reason,
+        market_review=market_review,
+        history_by_symbol=history_by_symbol,
     )
 
 

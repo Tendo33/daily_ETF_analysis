@@ -48,3 +48,8 @@ class FeishuNotifier:
             return NotificationResult(sent=True, reason="ok")
         except Exception as exc:  # noqa: BLE001
             return NotificationResult(sent=False, reason=str(exc))
+
+    def send_image(
+        self, title: str, image_bytes: bytes, filename: str = "report.png"
+    ) -> NotificationResult:
+        return NotificationResult(sent=False, reason="not_supported")

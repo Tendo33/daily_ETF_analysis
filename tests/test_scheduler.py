@@ -51,6 +51,28 @@ def test_scheduler_deduplicates_same_minute() -> None:
     assert len(service.calls) == 1
 
 
+def test_scheduler_uses_callback_when_provided() -> None:
+    settings = Settings(
+        schedule_enabled=True,
+        markets_enabled=["cn"],
+        etf_list=["CN:159659"],
+        schedule_cron_cn="0 0 9 * * 1-5",
+    )
+    service = _SpyService()
+    callback_calls: list[tuple[str, list[str]]] = []
+
+    def on_run(market: str, symbols: list[str]) -> None:
+        callback_calls.append((market, list(symbols)))
+
+    scheduler = EtfScheduler(service=service, settings=settings, on_run=on_run)
+    now = datetime(2026, 3, 9, 9, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    scheduler._maybe_run("cn", settings.schedule_cron_cn, now)
+
+    assert callback_calls == [("cn", ["CN:159659"])]
+    assert service.calls == []
+
+
 def test_next_run_for_cron_weekday() -> None:
     tz = ZoneInfo("Asia/Shanghai")
     cron_expr = "0 0 21 * * 1-5"

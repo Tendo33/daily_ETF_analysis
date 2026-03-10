@@ -910,6 +910,43 @@ class EtfRepository:
                 )
             return result
 
+    def get_recent_signals(
+        self, symbols: list[str], limit: int
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not symbols or limit <= 0:
+            return {}
+        normalized_symbols = [s.upper() for s in symbols]
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(EtfAnalysisReportORM)
+                    .where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
+                    .order_by(
+                        EtfAnalysisReportORM.symbol,
+                        desc(EtfAnalysisReportORM.trade_date),
+                        desc(EtfAnalysisReportORM.id),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            results: dict[str, list[dict[str, Any]]] = {
+                s: [] for s in normalized_symbols
+            }
+            for row in rows:
+                bucket = results.setdefault(row.symbol, [])
+                if len(bucket) >= limit:
+                    continue
+                bucket.append(
+                    {
+                        "trade_date": row.trade_date.isoformat(),
+                        "action": row.action,
+                        "trend": row.trend,
+                        "score": row.score,
+                    }
+                )
+            return {k: v for k, v in results.items() if v}
+
     def get_latest_report_trade_date_for_task(self, task_id: str) -> date | None:
         with self.session() as db:
             return (

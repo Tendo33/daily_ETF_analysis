@@ -705,10 +705,13 @@ dependencies = [
     { name = "exchange-calendars" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "imgkit" },
+    { name = "jinja2" },
     { name = "json-repair" },
     { name = "lark-oapi" },
     { name = "litellm" },
     { name = "loguru" },
+    { name = "markdown2" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pytdx" },
@@ -750,10 +753,13 @@ requires-dist = [
     { name = "exchange-calendars", specifier = ">=4.5.0" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "httpx", specifier = ">=0.26.0" },
+    { name = "imgkit", specifier = ">=1.2.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
     { name = "json-repair", specifier = ">=0.55.1" },
     { name = "lark-oapi", specifier = ">=1.0.0" },
     { name = "litellm", specifier = ">=1.80.10" },
     { name = "loguru", specifier = ">=0.7.0" },
+    { name = "markdown2", specifier = ">=2.4.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.10.6" },
@@ -1330,6 +1336,18 @@ wheels = [
 ]
 
 [[package]]
+name = "imgkit"
+version = "1.2.3"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/96/66/49089f7ca929e854f4f110259de392ec8bbed5ac3f2f9e1ff493f6623b15/imgkit-1.2.3.tar.gz", hash = "sha256:c9ade93d0281277c898b983c959f11f0cc1cb4a5fed144560dfa4d273fb50cd8", size = 11690, upload-time = "2023-02-23T08:01:58.396Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/bf/b0/e0c8aaafb20377eccb9aedbb9e00c21aeaac9cdc13d31d1c7532e1241bab/imgkit-1.2.3-py3-none-any.whl", hash = "sha256:cba8e3f67da6e0a5c87345a8b41605337851f9b9b75719500fa6810ecff84791", size = 10634, upload-time = "2023-02-23T08:01:57.223Z" },
+]
+
+[[package]]
 name = "importlib-metadata"
 version = "8.7.1"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -1792,6 +1810,15 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz", hash = "sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3", size = 73070, upload-time = "2025-08-11T12:57:52.854Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
+]
+
+[[package]]
+name = "markdown2"
+version = "2.5.5"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e4/ae/07d4a5fcaa5509221287d289323d75ac8eda5a5a4ac9de2accf7bbcc2b88/markdown2-2.5.5.tar.gz", hash = "sha256:001547e68f6e7fcf0f1cb83f7e82f48aa7d48b2c6a321f0cd20a853a8a2d1664", size = 157249, upload-time = "2026-03-02T20:46:53.411Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/43/af/4b3891eb0a49d6cfd5cbf3e9bf514c943afc2b0f13e2c57cc57cd88ecc21/markdown2-2.5.5-py3-none-any.whl", hash = "sha256:be798587e09d1f52d2e4d96a649c4b82a778c75f9929aad52a2c95747fa26941", size = 56250, upload-time = "2026-03-02T20:46:52.032Z" },
 ]
 
 [[package]]

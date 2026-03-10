@@ -271,6 +271,39 @@ uv run pytest
 - `chore: add security baseline scan`
 - `docs: add phase4 runbook`
 
+## Task X: Market Review Depth Enhancements (Industry Trend/Risk/Weighted Recommendation)
+
+**Goal:** 在保持简化架构的前提下，增强 ETF 大盘复盘深度，增加行业维度的趋势变化、风险聚合与推荐权重评分。
+
+**Files:**
+- Modify: `src/daily_etf_analysis/services/market_review.py`
+- Modify: `src/daily_etf_analysis/repositories/repository.py`
+- Modify: `src/daily_etf_analysis/reports/renderer.py`
+- Modify: `templates/report_markdown.j2`
+- Modify: `src/daily_etf_analysis/config/settings.py`
+- Test: `tests/test_market_review.py`
+- Test: `tests/test_report_renderer.py`
+
+**Step 1: Write the failing tests**
+- 行业趋势变化：近 N 天 action/trend 变化统计（per industry）。
+- 行业风险聚合：按行业聚合风险提示（top N）。
+- 行业推荐权重：action 分布 + 行业均分综合评分产出“推荐等级”。
+
+**Step 2: Run tests to verify they fail**
+- `uv run pytest tests/test_market_review.py -v`
+
+**Step 3: Write minimal implementation**
+- 新增配置：
+  - `INDUSTRY_TREND_WINDOW_DAYS`（默认 5）
+  - `INDUSTRY_RISK_TOP_N`（默认 3）
+  - `INDUSTRY_RECOMMEND_WEIGHTS`（如 `{"buy":1,"hold":0,"sell":-1,"score_weight":0.5}`）
+- 通过历史信号查询构建行业趋势变化统计。
+- 风险提示按行业聚合，并截断 Top N。
+- 计算行业推荐分：`action_score * (1-score_weight) + avg_score/100 * score_weight`。
+
+**Step 4: Run tests to verify they pass**
+- `uv run pytest tests/test_market_review.py -v`
+
 ## Risks & Mitigations
 
 - 风险: 监控指标过多影响性能。

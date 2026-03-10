@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+
 import httpx
 
 from daily_etf_analysis.config.settings import Settings, get_settings
@@ -30,6 +33,30 @@ class WechatNotifier:
         payload = {
             "msgtype": "markdown",
             "markdown": {"content": f"# {title}\n\n{markdown}"},
+        }
+        try:
+            response = httpx.post(
+                self.webhook_url,
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            return NotificationResult(sent=True, reason="ok")
+        except Exception as exc:  # noqa: BLE001
+            return NotificationResult(sent=False, reason=str(exc))
+
+    def send_image(
+        self, title: str, image_bytes: bytes, filename: str = "report.png"
+    ) -> NotificationResult:
+        if not self.webhook_url:
+            return NotificationResult(sent=False, reason="disabled")
+
+        payload = {
+            "msgtype": "image",
+            "image": {
+                "base64": base64.b64encode(image_bytes).decode("utf-8"),
+                "md5": hashlib.md5(image_bytes).hexdigest(),
+            },
         }
         try:
             response = httpx.post(

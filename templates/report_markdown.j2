@@ -1,0 +1,84 @@
+# Daily ETF Analysis Report
+
+## Summary
+- Task ID: {{ task_id }}
+- Status: {{ status }}
+- Date: {{ report_date }}
+- Market: {{ market }}
+- Symbols analyzed: {{ report_rows | length }}
+
+## Top Symbols
+{% if report_rows %}
+{% for row in (report_rows | sort(attribute='score', reverse=True))[:5] %}
+- {{ row.symbol }}: action={{ row.action }}, trend={{ row.trend }}, score={{ row.score }}{% if row.summary %} | {{ row.summary }}{% endif %}{% if row.key_points %} | points: {{ row.key_points | join('; ') }}{% endif %}
+{% endfor %}
+{% else %}
+- No symbols
+{% endif %}
+
+## Risk Alerts
+{% set has_alerts = false %}
+{% for row in report_rows %}
+  {% if row.risk_alerts %}
+    {% for alert in row.risk_alerts %}
+- {{ row.symbol }}: {{ alert }}
+      {% set has_alerts = true %}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{% if not has_alerts %}
+- No risk alerts
+{% endif %}
+
+{% if market_review %}
+## Market Review
+- Avg score: {{ market_review.avg_score if market_review.avg_score is not none else '-' }}
+- Trend distribution: {% if market_review.trend_counts %}{{ market_review.trend_counts }}{% else %}-{% endif %}
+- Action distribution: {% if market_review.action_counts %}{{ market_review.action_counts }}{% else %}-{% endif %}
+
+### Top ETFs
+{% if market_review.top %}
+{% for row in market_review.top %}
+- {{ row.symbol }}: score={{ row.score }}, action={{ row.action }}
+{% endfor %}
+{% else %}
+- No data
+{% endif %}
+
+### Bottom ETFs
+{% if market_review.bottom %}
+{% for row in market_review.bottom %}
+- {{ row.symbol }}: score={{ row.score }}, action={{ row.action }}
+{% endfor %}
+{% else %}
+- No data
+{% endif %}
+
+### Industry Summary
+{% if market_review.industry %}
+{% for row in market_review.industry %}
+- {{ row.industry }}: count={{ row.count }}, avg_score={{ row.avg_score }}, top={{ row.top_symbol }}, actions={{ row.action_counts }}
+{% endfor %}
+{% else %}
+- No industry mapping
+{% endif %}
+
+{% endif %}
+
+{% if history_by_symbol %}
+## History Signals
+{% for symbol, items in history_by_symbol.items() %}
+- {{ symbol }}: {% for item in items %}{{ item.trade_date }}:{{ item.action }}/{{ item.trend }}/{{ item.score }}{% if not loop.last %}, {% endif %}{% endfor %}
+{% endfor %}
+
+{% endif %}
+
+{% if skip_reason %}
+## Notes
+- {{ skip_reason }}
+{% elif notes %}
+## Notes
+{{ notes }}
+{% endif %}
+
+Disclaimer: {{ disclaimer }}
