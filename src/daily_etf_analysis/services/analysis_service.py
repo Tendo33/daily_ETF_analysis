@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from daily_etf_analysis.backtest import BacktestEngine
 from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.domain import (
     AnalysisTask,
@@ -13,6 +14,7 @@ from daily_etf_analysis.domain import (
 from daily_etf_analysis.observability import get_provider_health_snapshot
 from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
+from daily_etf_analysis.services.system_config_service import SystemConfigService
 from daily_etf_analysis.services.task_manager import TaskManager
 
 
@@ -26,6 +28,10 @@ class AnalysisService:
         self.task_manager = TaskManager(
             repository=self.repository, pipeline=self.pipeline
         )
+        self.system_config_service = SystemConfigService(
+            settings=self.settings, repository=self.repository
+        )
+        self.system_config_service.set_on_settings_applied(self._apply_runtime_settings)
 
     def run_analysis(
         self,
@@ -123,6 +129,103 @@ class AnalysisService:
         market_filter = None if market in (None, "all") else market
         return self.repository.get_daily_reports(target_date, market=market_filter)
 
+    def list_history(
+        self, page: int = 1, limit: int = 20, symbol: str | None = None
+    ) -> dict[str, object]:
+        normalized_symbol = normalize_symbol(symbol) if symbol else None
+        items, total = self.repository.list_history(
+            page=page, limit=limit, symbol=normalized_symbol
+        )
+        return {"items": items, "page": page, "limit": limit, "total": total}
+
+    def get_history_detail(self, record_id: int) -> dict[str, object] | None:
+        return self.repository.get_history_record(record_id)
+
+    def get_history_news(self, record_id: int) -> list[dict[str, object]] | None:
+        record = self.repository.get_history_record(record_id)
+        if record is None:
+            return None
+        news = record.get("news_items", [])
+        if isinstance(news, list):
+            return [item for item in news if isinstance(item, dict)]
+        return []
+
+    def run_backtest(
+        self, symbols: list[str] | None = None, eval_window_days: int = 20
+    ) -> dict[str, object]:
+        if eval_window_days < 1:
+            raise ValueError("eval_window_days must be >= 1")
+
+        target_symbols = [
+            normalize_symbol(s) for s in (symbols or self.settings.etf_list)
+        ]
+        engine = BacktestEngine(eval_window_days=eval_window_days)
+        signals = self.repository.get_backtest_signals(target_symbols)
+        prices = self.repository.get_price_series(target_symbols)
+        run_summary, symbol_rows = engine.run(signals=signals, prices_by_symbol=prices)
+
+        disclaimer = "For research only; not investment advice."
+        run_id = self.repository.create_backtest_run(
+            eval_window_days=eval_window_days,
+            symbols=target_symbols,
+            disclaimer=disclaimer,
+        )
+        self.repository.update_backtest_run_summary(
+            run_id=run_id,
+            total_samples=int(run_summary["total_samples"]),
+            evaluated_samples=int(run_summary["evaluated_samples"]),
+            skipped_count=int(run_summary["skipped_count"]),
+            direction_hit_rate=_to_float_or_none(run_summary["direction_hit_rate"]),
+            avg_return=_to_float_or_none(run_summary["avg_return"]),
+            max_drawdown=_to_float_or_none(run_summary["max_drawdown"]),
+            win_rate=_to_float_or_none(run_summary["win_rate"]),
+        )
+        self.repository.save_backtest_results(run_id=run_id, results=symbol_rows)
+        run = self.repository.get_backtest_run(run_id)
+        results = self.repository.get_backtest_results(run_id)
+        return {"run": run, "results": results}
+
+    def get_backtest_results(self, run_id: str) -> list[dict[str, object]] | None:
+        if self.repository.get_backtest_run(run_id) is None:
+            return None
+        return self.repository.get_backtest_results(run_id)
+
+    def get_backtest_performance(self, run_id: str) -> dict[str, object] | None:
+        return self.repository.get_backtest_run(run_id)
+
+    def get_backtest_symbol_performance(
+        self, run_id: str, symbol: str
+    ) -> dict[str, object] | None:
+        if self.repository.get_backtest_run(run_id) is None:
+            return None
+        normalized = normalize_symbol(symbol)
+        return self.repository.get_backtest_symbol_performance(run_id, normalized)
+
+    def get_system_config(self) -> dict[str, object]:
+        return self.system_config_service.get_system_config()
+
+    def validate_system_config(self, updates: dict[str, object]) -> dict[str, object]:
+        return self.system_config_service.validate_system_config(updates)
+
+    def update_system_config(
+        self, expected_version: int, updates: dict[str, object], actor: str
+    ) -> dict[str, object]:
+        return self.system_config_service.update_system_config(
+            expected_version=expected_version,
+            updates=updates,
+            actor=actor,
+        )
+
+    def get_system_config_schema(self) -> dict[str, object]:
+        return self.system_config_service.get_system_config_schema()
+
+    def list_system_config_audit(
+        self, page: int = 1, limit: int = 20
+    ) -> list[dict[str, object]]:
+        return self.system_config_service.list_system_config_audit(
+            page=page, limit=limit
+        )
+
     def get_task_report_date(self, task_id: str) -> date | None:
         return self.repository.get_latest_report_trade_date_for_task(task_id)
 
@@ -201,6 +304,15 @@ class AnalysisService:
 
     def get_provider_health(self) -> list[dict[str, object]]:
         return get_provider_health_snapshot()
+
+    def _apply_runtime_settings(self, settings: Settings) -> None:
+        self.settings = settings
+        self.repository.settings = settings
+        self.pipeline = DailyPipeline(settings=settings, repository=self.repository)
+        self.task_manager = TaskManager(
+            repository=self.repository, pipeline=self.pipeline
+        )
+        self.system_config_service.settings = settings
 
 
 def _confidence_weight(value: str) -> int:

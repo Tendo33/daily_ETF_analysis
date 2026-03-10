@@ -75,6 +75,29 @@ jobs:
           echo "FEISHU_WEBHOOK_URL configured: $([ -n "$FEISHU_WEBHOOK_URL" ] && echo yes || echo no)"
           echo "TUSHARE_TOKEN configured: $([ -n "$TUSHARE_TOKEN" ] && echo yes || echo no)"
 
+      - name: Run daily analysis smoke
+        env:
+          ETF_LIST: ${{ vars.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
+          INDEX_PROXY_MAP: ${{ vars.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
+          MARKETS_ENABLED: ${{ vars.MARKETS_ENABLED || 'cn,hk,us' }}
+          DATABASE_URL: sqlite:///./data/daily_etf_analysis.db
+          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
+          PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
+          LITELLM_MODEL: ${{ vars.LITELLM_MODEL }}
+          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
+          LLM_AIHUBMIX_BASE_URL: ${{ vars.LLM_AIHUBMIX_BASE_URL }}
+          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
+          LLM_AIHUBMIX_MODELS: ${{ vars.LLM_AIHUBMIX_MODELS }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+        run: |
+          uv run python scripts/run_daily_analysis.py \
+            --symbols CN:159659 \
+            --skip-notify \
+            --wait-timeout-seconds 120 \
+            --poll-interval-seconds 1
+
       - name: Run daily analysis
         env:
           ETF_LIST: ${{ vars.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}

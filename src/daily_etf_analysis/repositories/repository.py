@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     desc,
+    func,
     select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -122,6 +123,68 @@ class EtfAnalysisReportORM(Base):
     factors_json: Mapped[str] = mapped_column(Text, default="{}")
     key_points_json: Mapped[str] = mapped_column(Text, default="[]")
     risk_alerts_json: Mapped[str] = mapped_column(Text, default="[]")
+    context_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    news_items_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class BacktestRunORM(Base):
+    __tablename__ = "backtest_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    eval_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    symbols_json: Mapped[str] = mapped_column(Text, default="[]")
+    total_samples: Mapped[int] = mapped_column(Integer, default=0)
+    evaluated_samples: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    direction_hit_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    disclaimer: Mapped[str] = mapped_column(
+        Text, default="For research only; not investment advice."
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class BacktestResultORM(Base):
+    __tablename__ = "backtest_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    trade_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    evaluated_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    direction_hit_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class SystemConfigSnapshotORM(Base):
+    __tablename__ = "system_config_snapshots"
+
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_by: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="system"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class SystemConfigAuditLogORM(Base):
+    __tablename__ = "system_config_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    actor: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
+    action: Mapped[str] = mapped_column(String(32), nullable=False, default="update")
+    changes_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
 
 
 class EtfRepository:
@@ -395,6 +458,8 @@ class EtfRepository:
         trade_date: date,
         factors: dict[str, Any],
         result: EtfAnalysisResult,
+        context_snapshot: dict[str, Any] | None = None,
+        news_items: list[dict[str, Any]] | None = None,
     ) -> None:
         with self.session() as db:
             db.add(
@@ -413,8 +478,403 @@ class EtfRepository:
                     factors_json=json.dumps(factors, ensure_ascii=False),
                     key_points_json=json.dumps(result.key_points, ensure_ascii=False),
                     risk_alerts_json=json.dumps(result.risk_alerts, ensure_ascii=False),
+                    context_snapshot_json=json.dumps(
+                        context_snapshot or {}, ensure_ascii=False
+                    ),
+                    news_items_json=json.dumps(news_items or [], ensure_ascii=False),
+                    created_at=utc_now_naive(),
                 )
             )
+
+    def list_history(
+        self, page: int = 1, limit: int = 20, symbol: str | None = None
+    ) -> tuple[list[dict[str, Any]], int]:
+        offset = max(0, (page - 1) * limit)
+        with self.session() as db:
+            query = select(EtfAnalysisReportORM)
+            count_query = select(func.count()).select_from(EtfAnalysisReportORM)
+            if symbol:
+                normalized = symbol.upper()
+                query = query.where(EtfAnalysisReportORM.symbol == normalized)
+                count_query = count_query.where(
+                    EtfAnalysisReportORM.symbol == normalized
+                )
+            total = int(db.execute(count_query).scalar() or 0)
+            rows = (
+                db.execute(
+                    query.order_by(
+                        desc(EtfAnalysisReportORM.trade_date),
+                        desc(EtfAnalysisReportORM.id),
+                    )
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            items = [
+                {
+                    "id": row.id,
+                    "task_id": row.task_id,
+                    "symbol": row.symbol,
+                    "trade_date": row.trade_date.isoformat(),
+                    "score": row.score,
+                    "action": row.action,
+                    "confidence": row.confidence,
+                    "summary": row.summary,
+                    "success": row.success,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+            return items, total
+
+    def get_history_record(self, record_id: int) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(EtfAnalysisReportORM).where(EtfAnalysisReportORM.id == record_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "id": row.id,
+                "task_id": row.task_id,
+                "symbol": row.symbol,
+                "trade_date": row.trade_date.isoformat(),
+                "score": row.score,
+                "trend": row.trend,
+                "action": row.action,
+                "confidence": row.confidence,
+                "summary": row.summary,
+                "model_used": row.model_used,
+                "success": row.success,
+                "error_message": row.error_message,
+                "factors": json.loads(row.factors_json),
+                "key_points": json.loads(row.key_points_json),
+                "risk_alerts": json.loads(row.risk_alerts_json),
+                "context_snapshot": json.loads(row.context_snapshot_json),
+                "news_items": json.loads(row.news_items_json),
+                "created_at": row.created_at.isoformat(),
+            }
+
+    def get_history_news(self, record_id: int) -> list[dict[str, Any]]:
+        record = self.get_history_record(record_id)
+        if not record:
+            return []
+        value = record.get("news_items", [])
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        return []
+
+    def create_backtest_run(
+        self, eval_window_days: int, symbols: list[str], disclaimer: str
+    ) -> str:
+        run_id = utc_now_naive().strftime("%Y%m%d%H%M%S%f")
+        with self.session() as db:
+            db.add(
+                BacktestRunORM(
+                    run_id=run_id,
+                    eval_window_days=eval_window_days,
+                    symbols_json=json.dumps([s.upper() for s in symbols]),
+                    disclaimer=disclaimer,
+                )
+            )
+        return run_id
+
+    def update_backtest_run_summary(
+        self,
+        run_id: str,
+        total_samples: int,
+        evaluated_samples: int,
+        skipped_count: int,
+        direction_hit_rate: float | None,
+        avg_return: float | None,
+        max_drawdown: float | None,
+        win_rate: float | None,
+    ) -> None:
+        with self.session() as db:
+            row = db.execute(
+                select(BacktestRunORM).where(BacktestRunORM.run_id == run_id)
+            ).scalar_one()
+            row.total_samples = total_samples
+            row.evaluated_samples = evaluated_samples
+            row.skipped_count = skipped_count
+            row.direction_hit_rate = direction_hit_rate
+            row.avg_return = avg_return
+            row.max_drawdown = max_drawdown
+            row.win_rate = win_rate
+
+    def save_backtest_results(self, run_id: str, results: list[dict[str, Any]]) -> None:
+        with self.session() as db:
+            db.query(BacktestResultORM).filter(
+                BacktestResultORM.run_id == run_id
+            ).delete()
+            for item in results:
+                db.add(
+                    BacktestResultORM(
+                        run_id=run_id,
+                        symbol=str(item.get("symbol", "")).upper(),
+                        trade_date=item.get("trade_date"),
+                        sample_count=int(item.get("sample_count", 0)),
+                        evaluated_count=int(item.get("evaluated_count", 0)),
+                        skipped_count=int(item.get("skipped_count", 0)),
+                        direction_hit_rate=_float_or_none(
+                            item.get("direction_hit_rate")
+                        ),
+                        avg_return=_float_or_none(item.get("avg_return")),
+                        max_drawdown=_float_or_none(item.get("max_drawdown")),
+                        win_rate=_float_or_none(item.get("win_rate")),
+                        details_json=json.dumps(
+                            item.get("details", {}), ensure_ascii=False
+                        ),
+                    )
+                )
+
+    def get_backtest_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = db.execute(
+                select(BacktestRunORM).where(BacktestRunORM.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "run_id": row.run_id,
+                "eval_window_days": row.eval_window_days,
+                "symbols": json.loads(row.symbols_json),
+                "total_samples": row.total_samples,
+                "evaluated_samples": row.evaluated_samples,
+                "skipped_count": row.skipped_count,
+                "direction_hit_rate": row.direction_hit_rate,
+                "avg_return": row.avg_return,
+                "max_drawdown": row.max_drawdown,
+                "win_rate": row.win_rate,
+                "disclaimer": row.disclaimer,
+                "created_at": row.created_at.isoformat(),
+            }
+
+    def get_latest_backtest_run(self) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = (
+                db.execute(
+                    select(BacktestRunORM).order_by(desc(BacktestRunORM.created_at))
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                return None
+            return {
+                "run_id": row.run_id,
+                "eval_window_days": row.eval_window_days,
+                "symbols": json.loads(row.symbols_json),
+                "total_samples": row.total_samples,
+                "evaluated_samples": row.evaluated_samples,
+                "skipped_count": row.skipped_count,
+                "direction_hit_rate": row.direction_hit_rate,
+                "avg_return": row.avg_return,
+                "max_drawdown": row.max_drawdown,
+                "win_rate": row.win_rate,
+                "disclaimer": row.disclaimer,
+                "created_at": row.created_at.isoformat(),
+            }
+
+    def get_backtest_results(self, run_id: str) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(BacktestResultORM)
+                    .where(BacktestResultORM.run_id == run_id)
+                    .order_by(BacktestResultORM.symbol)
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "run_id": row.run_id,
+                    "symbol": row.symbol,
+                    "trade_date": row.trade_date.isoformat()
+                    if row.trade_date is not None
+                    else None,
+                    "sample_count": row.sample_count,
+                    "evaluated_count": row.evaluated_count,
+                    "skipped_count": row.skipped_count,
+                    "direction_hit_rate": row.direction_hit_rate,
+                    "avg_return": row.avg_return,
+                    "max_drawdown": row.max_drawdown,
+                    "win_rate": row.win_rate,
+                    "details": json.loads(row.details_json),
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+
+    def get_backtest_symbol_performance(
+        self, run_id: str, symbol: str
+    ) -> dict[str, Any] | None:
+        normalized = symbol.upper()
+        with self.session() as db:
+            row = (
+                db.execute(
+                    select(BacktestResultORM)
+                    .where(
+                        BacktestResultORM.run_id == run_id,
+                        BacktestResultORM.symbol == normalized,
+                    )
+                    .order_by(desc(BacktestResultORM.created_at))
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                return None
+            return {
+                "symbol": row.symbol,
+                "sample_count": row.sample_count,
+                "evaluated_count": row.evaluated_count,
+                "skipped_count": row.skipped_count,
+                "direction_hit_rate": row.direction_hit_rate,
+                "avg_return": row.avg_return,
+                "max_drawdown": row.max_drawdown,
+                "win_rate": row.win_rate,
+            }
+
+    def create_system_config_snapshot(
+        self, config_payload: dict[str, Any], actor: str, expected_version: int | None
+    ) -> int:
+        with self.session() as db:
+            latest_version = (
+                db.execute(select(func.max(SystemConfigSnapshotORM.version))).scalar()
+                or 0
+            )
+            if expected_version is not None and expected_version != int(latest_version):
+                raise ValueError(
+                    f"version_conflict: expected={expected_version}, actual={latest_version}"
+                )
+            new_version = int(latest_version) + 1
+            db.add(
+                SystemConfigSnapshotORM(
+                    version=new_version,
+                    config_json=json.dumps(config_payload, ensure_ascii=False),
+                    created_by=actor,
+                )
+            )
+            return new_version
+
+    def get_latest_system_config_snapshot(self) -> dict[str, Any] | None:
+        with self.session() as db:
+            row = (
+                db.execute(
+                    select(SystemConfigSnapshotORM).order_by(
+                        desc(SystemConfigSnapshotORM.version)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                return None
+            return {
+                "version": row.version,
+                "config": json.loads(row.config_json),
+                "created_by": row.created_by,
+                "created_at": row.created_at.isoformat(),
+            }
+
+    def create_system_config_audit_log(
+        self, version: int, actor: str, action: str, changes: dict[str, Any]
+    ) -> None:
+        with self.session() as db:
+            db.add(
+                SystemConfigAuditLogORM(
+                    version=version,
+                    actor=actor,
+                    action=action,
+                    changes_json=json.dumps(changes, ensure_ascii=False),
+                )
+            )
+
+    def list_system_config_audit_logs(
+        self, page: int = 1, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        offset = max(0, (page - 1) * limit)
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(SystemConfigAuditLogORM)
+                    .order_by(desc(SystemConfigAuditLogORM.id))
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "version": row.version,
+                    "actor": row.actor,
+                    "action": row.action,
+                    "changes": json.loads(row.changes_json),
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+
+    def delete_system_config_snapshot(self, version: int) -> None:
+        with self.session() as db:
+            db.query(SystemConfigSnapshotORM).filter(
+                SystemConfigSnapshotORM.version == version
+            ).delete()
+
+    def get_backtest_signals(self, symbols: list[str]) -> list[dict[str, Any]]:
+        normalized_symbols = [s.upper() for s in symbols]
+        if not normalized_symbols:
+            return []
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(EtfAnalysisReportORM)
+                    .where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
+                    .order_by(
+                        EtfAnalysisReportORM.symbol,
+                        EtfAnalysisReportORM.trade_date,
+                        EtfAnalysisReportORM.id,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "symbol": row.symbol,
+                    "trade_date": row.trade_date,
+                    "action": row.action,
+                }
+                for row in rows
+            ]
+
+    def get_price_series(self, symbols: list[str]) -> dict[str, list[dict[str, Any]]]:
+        normalized_symbols = [s.upper() for s in symbols]
+        if not normalized_symbols:
+            return {}
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(EtfDailyBarORM)
+                    .where(EtfDailyBarORM.symbol.in_(normalized_symbols))
+                    .order_by(EtfDailyBarORM.symbol, EtfDailyBarORM.trade_date)
+                )
+                .scalars()
+                .all()
+            )
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                grouped.setdefault(row.symbol, []).append(
+                    {"trade_date": row.trade_date, "close": row.close}
+                )
+            return grouped
 
     def get_daily_reports(
         self, report_date: date, market: str | None = None
@@ -539,3 +999,18 @@ class EtfRepository:
                     source=row.source,
                 )
             return latest
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

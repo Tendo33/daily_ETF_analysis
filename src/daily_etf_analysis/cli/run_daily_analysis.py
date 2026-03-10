@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus
-from daily_etf_analysis.notifications import FeishuNotifier
+from daily_etf_analysis.notifications import NotificationManager
+from daily_etf_analysis.reports import render_daily_report_markdown
 from daily_etf_analysis.services import AnalysisService
 
 SKIPPED_STATUS = "skipped"
@@ -64,7 +65,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def run_daily_analysis(
     *,
     service: AnalysisService,
-    notifier: FeishuNotifier,
+    notifier: Any,
     force_run: bool,
     symbols: list[str] | None,
     market: str | None,
@@ -81,6 +82,13 @@ def run_daily_analysis(
     report_market = market if market is not None else "all"
     if not selected_symbols:
         report_date = date.today()
+        markdown = _build_markdown_summary(
+            task_id=SKIPPED_STATUS,
+            status=SKIPPED_STATUS,
+            report_date=report_date,
+            market=report_market,
+            report_rows=[],
+        )
         report_path = _write_json_report(
             output_dir=output_dir,
             report_date=report_date,
@@ -94,12 +102,20 @@ def run_daily_analysis(
                 "report_rows": [],
             },
         )
+        markdown_path = _write_markdown_report(
+            output_dir=output_dir,
+            report_date=report_date,
+            task_id=SKIPPED_STATUS,
+            markdown=markdown,
+        )
         return {
             "task_id": SKIPPED_STATUS,
             "status": SKIPPED_STATUS,
             "report_path": str(report_path),
+            "markdown_report_path": str(markdown_path),
             "notification_sent": False,
             "notification_reason": "no_symbols_matched",
+            "notification_channels": {},
         }
 
     task = service.run_analysis(
@@ -130,35 +146,52 @@ def run_daily_analysis(
             "report_rows": report_rows,
         },
     )
+    markdown = _build_markdown_summary(
+        task_id=task.task_id,
+        status=task_status,
+        report_date=report_date,
+        market=report_market,
+        report_rows=report_rows,
+    )
+    markdown_path = _write_markdown_report(
+        output_dir=output_dir,
+        report_date=report_date,
+        task_id=task.task_id,
+        markdown=markdown,
+    )
 
     notification_sent = False
     notification_reason = "skipped" if skip_notify else "disabled"
+    notification_channels: dict[str, dict[str, object]] = {}
     if not skip_notify:
-        message = _build_markdown_summary(
-            task_id=task.task_id,
-            status=task_status,
-            report_date=report_date,
-            market=report_market,
-            report_rows=report_rows,
-            report_path=report_path,
-        )
-        notify = notifier.send_markdown(title="daily_ETF_analysis", markdown=message)
+        notify = notifier.send_markdown(title="daily_ETF_analysis", markdown=markdown)
         notification_sent = notify.sent
         notification_reason = notify.reason
+        channels = getattr(notify, "channel_results", None)
+        if isinstance(channels, dict):
+            for key, item in channels.items():
+                sent_value = bool(getattr(item, "sent", False))
+                reason_value = str(getattr(item, "reason", "unknown"))
+                notification_channels[str(key)] = {
+                    "sent": sent_value,
+                    "reason": reason_value,
+                }
 
     return {
         "task_id": task.task_id,
         "status": task_status,
         "report_path": str(report_path),
+        "markdown_report_path": str(markdown_path),
         "notification_sent": notification_sent,
         "notification_reason": notification_reason,
+        "notification_channels": notification_channels,
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_cli_args(argv)
     service = AnalysisService()
-    notifier = FeishuNotifier(service.settings)
+    notifier = NotificationManager(service.settings)
     symbols = _parse_symbols_csv(args.symbols)
     result = run_daily_analysis(
         service=service,
@@ -252,23 +285,28 @@ def _build_markdown_summary(
     report_date: date,
     market: str,
     report_rows: list[dict[str, Any]],
-    report_path: Path,
 ) -> str:
-    top_lines = []
-    for row in report_rows[:5]:
-        symbol = row.get("symbol", "-")
-        action = row.get("action", "-")
-        score = row.get("score", "-")
-        top_lines.append(f"{symbol}: action={action}, score={score}")
-    details = "\n".join(top_lines) if top_lines else "No report rows found."
-    return (
-        f"Task: {task_id}\n"
-        f"Status: {status}\n"
-        f"Date: {report_date.isoformat()}\n"
-        f"Market: {market}\n"
-        f"Report: {report_path}\n"
-        f"Top:\n{details}"
+    return render_daily_report_markdown(
+        task_id=task_id,
+        status=status,
+        report_date=report_date,
+        market=market,
+        report_rows=report_rows,
+        disclaimer="For research only; not investment advice.",
     )
+
+
+def _write_markdown_report(
+    *, output_dir: Path, report_date: date, task_id: str, markdown: str
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    run_filename = f"report_{report_date.strftime('%Y%m%d')}_{task_id[:8]}.md"
+    report_path = output_dir / run_filename
+    report_path.write_text(markdown, encoding="utf-8")
+
+    legacy_path = output_dir / f"report_{report_date.strftime('%Y%m%d')}.md"
+    legacy_path.write_text(markdown, encoding="utf-8")
+    return report_path
 
 
 if __name__ == "__main__":

@@ -4,9 +4,16 @@ from datetime import date
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from daily_etf_analysis.api.auth import require_admin_token
 from daily_etf_analysis.api.v1.schemas import (
+    BacktestPerformanceResponse,
+    BacktestResultRowResponse,
+    BacktestRunRequest,
+    BacktestRunResponse,
+    HistoryDetailResponse,
+    HistoryListResponse,
     IndexComparisonResponse,
     IndexComparisonRowResponse,
     ProviderHealthResponse,
@@ -14,6 +21,12 @@ from daily_etf_analysis.api.v1.schemas import (
     ReplaceIndexMappingsRequest,
     RunAnalysisRequest,
     RunAnalysisResponse,
+    SystemConfigAuditItemResponse,
+    SystemConfigResponse,
+    SystemConfigSchemaResponse,
+    SystemConfigUpdateRequest,
+    SystemConfigValidateRequest,
+    SystemConfigValidateResponse,
     TaskResponse,
 )
 from daily_etf_analysis.config.settings import get_settings
@@ -29,7 +42,9 @@ def _service() -> AnalysisService:
 
 
 @router.post("/analysis/run", response_model=RunAnalysisResponse)
-def run_analysis(request: RunAnalysisRequest) -> RunAnalysisResponse:
+def run_analysis(
+    request: RunAnalysisRequest, _: None = Depends(require_admin_token)
+) -> RunAnalysisResponse:
     settings = get_settings()
     symbols = request.symbols
     if not symbols and request.markets:
@@ -76,6 +91,97 @@ def get_task(task_id: str) -> TaskResponse:
     )
 
 
+@router.get("/history", response_model=HistoryListResponse)
+def list_history(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=200),
+    symbol: str | None = Query(default=None),
+) -> HistoryListResponse:
+    try:
+        payload = _service().list_history(page=page, limit=limit, symbol=symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return HistoryListResponse.model_validate(payload)
+
+
+@router.get("/history/{record_id}", response_model=HistoryDetailResponse)
+def get_history_detail(record_id: int) -> HistoryDetailResponse:
+    item = _service().get_history_detail(record_id)
+    if item is None:
+        raise HTTPException(
+            status_code=404, detail=f"History record not found: {record_id}"
+        )
+    return HistoryDetailResponse.model_validate(item)
+
+
+@router.get("/history/{record_id}/news")
+def get_history_news(record_id: int) -> list[dict[str, object]]:
+    items = _service().get_history_news(record_id)
+    if items is None:
+        raise HTTPException(
+            status_code=404, detail=f"History record not found: {record_id}"
+        )
+    return items
+
+
+@router.post("/backtest/run", response_model=BacktestRunResponse)
+def run_backtest(
+    request: BacktestRunRequest, _: None = Depends(require_admin_token)
+) -> BacktestRunResponse:
+    try:
+        payload = _service().run_backtest(
+            symbols=request.symbols, eval_window_days=request.eval_window_days
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return BacktestRunResponse.model_validate(payload)
+
+
+@router.get("/backtest/results", response_model=list[BacktestResultRowResponse])
+def get_backtest_results(
+    run_id: str = Query(min_length=1),
+) -> list[BacktestResultRowResponse]:
+    rows = _service().get_backtest_results(run_id)
+    if rows is None:
+        raise HTTPException(status_code=404, detail=f"Backtest run not found: {run_id}")
+    return [BacktestResultRowResponse.model_validate(row) for row in rows]
+
+
+@router.get("/backtest/performance", response_model=BacktestPerformanceResponse)
+def get_backtest_performance(
+    run_id: str = Query(min_length=1),
+) -> BacktestPerformanceResponse:
+    run = _service().get_backtest_performance(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Backtest run not found: {run_id}")
+    return BacktestPerformanceResponse(
+        run_id=str(run["run_id"]),
+        direction_hit_rate=_to_float(run.get("direction_hit_rate")),
+        avg_return=_to_float(run.get("avg_return")),
+        max_drawdown=_to_float(run.get("max_drawdown")),
+        win_rate=_to_float(run.get("win_rate")),
+        disclaimer=str(
+            run.get("disclaimer", "For research only; not investment advice.")
+        ),
+    )
+
+
+@router.get("/backtest/performance/{symbol}", response_model=BacktestResultRowResponse)
+def get_backtest_symbol_performance(
+    symbol: str, run_id: str = Query(min_length=1)
+) -> BacktestResultRowResponse:
+    try:
+        row = _service().get_backtest_symbol_performance(run_id=run_id, symbol=symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Backtest record not found: run_id={run_id}, symbol={symbol}",
+        )
+    return BacktestResultRowResponse.model_validate(row)
+
+
 @router.get("/etfs")
 def list_etfs() -> list[dict[str, object]]:
     items = _service().list_etfs()
@@ -95,7 +201,9 @@ def list_etfs() -> list[dict[str, object]]:
 
 
 @router.put("/etfs")
-def replace_etfs(request: ReplaceEtfsRequest) -> list[dict[str, object]]:
+def replace_etfs(
+    request: ReplaceEtfsRequest, _: None = Depends(require_admin_token)
+) -> list[dict[str, object]]:
     items = _service().replace_etfs(request.symbols)
     return [
         {
@@ -119,7 +227,7 @@ def get_index_mappings() -> dict[str, list[str]]:
 
 @router.put("/index-mappings")
 def replace_index_mappings(
-    request: ReplaceIndexMappingsRequest,
+    request: ReplaceIndexMappingsRequest, _: None = Depends(require_admin_token)
 ) -> dict[str, list[str]]:
     return _service().replace_index_mappings(request.mappings)
 
@@ -188,3 +296,71 @@ def get_index_comparisons(
 def get_provider_health() -> list[ProviderHealthResponse]:
     items = _service().get_provider_health()
     return [ProviderHealthResponse.model_validate(item) for item in items]
+
+
+@router.get("/system/config", response_model=SystemConfigResponse)
+def get_system_config() -> SystemConfigResponse:
+    payload = _service().get_system_config()
+    return SystemConfigResponse.model_validate(payload)
+
+
+@router.post(
+    "/system/config/validate",
+    response_model=SystemConfigValidateResponse,
+)
+def validate_system_config(
+    request: SystemConfigValidateRequest, _: None = Depends(require_admin_token)
+) -> SystemConfigValidateResponse:
+    payload = _service().validate_system_config(request.updates)
+    return SystemConfigValidateResponse.model_validate(payload)
+
+
+@router.put("/system/config", response_model=SystemConfigResponse)
+def update_system_config(
+    request: SystemConfigUpdateRequest, _: None = Depends(require_admin_token)
+) -> SystemConfigResponse:
+    try:
+        payload = _service().update_system_config(
+            expected_version=request.expected_version,
+            updates=request.updates,
+            actor="admin",
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail.startswith("version_conflict:"):
+            raise HTTPException(status_code=409, detail=detail) from exc
+        raise HTTPException(status_code=422, detail=detail) from exc
+    return SystemConfigResponse.model_validate(payload)
+
+
+@router.get("/system/config/schema", response_model=SystemConfigSchemaResponse)
+def get_system_config_schema() -> SystemConfigSchemaResponse:
+    payload = _service().get_system_config_schema()
+    return SystemConfigSchemaResponse.model_validate(payload)
+
+
+@router.get(
+    "/system/config/audit",
+    response_model=list[SystemConfigAuditItemResponse],
+)
+def list_system_config_audit(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=200),
+) -> list[SystemConfigAuditItemResponse]:
+    rows = _service().list_system_config_audit(page=page, limit=limit)
+    return [SystemConfigAuditItemResponse.model_validate(row) for row in rows]
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

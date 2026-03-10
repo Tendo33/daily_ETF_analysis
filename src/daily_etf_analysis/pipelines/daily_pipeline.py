@@ -134,6 +134,14 @@ class DailyPipeline:
                     trade_date=trade_date,
                     factors=context.factors,
                     result=result,
+                    context_snapshot=_build_context_snapshot(
+                        symbol=symbol,
+                        market=market.value,
+                        benchmark_index=benchmark,
+                        force_refresh=force_refresh,
+                        news_provider=provider_name,
+                    ),
+                    news_items=context.news_items,
                 )
                 results.append(result)
             except Exception as exc:  # noqa: BLE001
@@ -145,6 +153,31 @@ class DailyPipeline:
                     trade_date=date.today(),
                     factors={"data_quality": "error"},
                     result=fallback,
+                    context_snapshot=_build_context_snapshot(
+                        symbol=symbol,
+                        market=market.value,
+                        benchmark_index=self._benchmark_from_mapping(symbol) or code,
+                        force_refresh=force_refresh,
+                        news_provider=None,
+                    ),
+                    news_items=[],
                 )
                 results.append(fallback)
         return results
+
+
+def _build_context_snapshot(
+    *,
+    symbol: str,
+    market: str,
+    benchmark_index: str,
+    force_refresh: bool,
+    news_provider: str | None,
+) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "market": market,
+        "benchmark_index": benchmark_index,
+        "force_refresh": force_refresh,
+        "news_provider": news_provider,
+    }

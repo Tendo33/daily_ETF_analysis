@@ -85,7 +85,20 @@ class Settings(BaseSettings):
     provider_circuit_fail_threshold: int = Field(default=3, ge=1, le=20)
     provider_circuit_reset_seconds: int = Field(default=60, ge=1, le=3600)
 
+    notify_channels: list[str] = Field(default_factory=lambda: ["feishu"])
     feishu_webhook_url: str | None = Field(default=None)
+    wechat_webhook_url: str | None = Field(default=None)
+    telegram_bot_token: str | None = Field(default=None)
+    telegram_chat_id: str | None = Field(default=None)
+    email_smtp_host: str | None = Field(default=None)
+    email_smtp_port: int = Field(default=25, ge=1, le=65535)
+    email_username: str | None = Field(default=None)
+    email_password: str | None = Field(default=None)
+    email_from: str | None = Field(default=None)
+    email_to: list[str] = Field(default_factory=list)
+
+    api_auth_enabled: bool = Field(default=False)
+    api_admin_token: str | None = Field(default=None)
 
     schedule_enabled: bool = Field(default=False)
     schedule_cron_cn: str = Field(default="0 30 15 * * 1-5")
@@ -127,6 +140,8 @@ class Settings(BaseSettings):
         "tavily_api_keys",
         "news_provider_priority",
         "realtime_source_priority",
+        "notify_channels",
+        "email_to",
         mode="before",
     )
     @classmethod

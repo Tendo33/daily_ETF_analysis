@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.domain import (
@@ -75,6 +76,19 @@ class _NewsStub:
         return [], "mock"
 
 
+class _NewsWithItemsStub:
+    def search(self, query: str, max_results: int = 5, days: int = 3):  # type: ignore[no-untyped-def]
+        return [
+            SimpleNamespace(
+                title="Macro update",
+                url="https://example.com/news/1",
+                snippet="Snippet",
+                source="mock-news",
+                published_at=datetime(2026, 3, 9, tzinfo=UTC),
+            )
+        ], "mock-news"
+
+
 class _AnalyzerStub:
     def analyze(self, context):  # type: ignore[no-untyped-def]
         return EtfAnalysisResult(
@@ -89,7 +103,9 @@ class _AnalyzerStub:
         )
 
 
-def _build_pipeline() -> tuple[DailyPipeline, _FetcherStub, _RepoStub]:
+def _build_pipeline(
+    news_manager: object | None = None,
+) -> tuple[DailyPipeline, _FetcherStub, _RepoStub]:
     settings = Settings(
         etf_list=["CN:159659"],
         index_proxy_map={"NDX": ["CN:159659"]},
@@ -100,7 +116,7 @@ def _build_pipeline() -> tuple[DailyPipeline, _FetcherStub, _RepoStub]:
         settings=settings,
         repository=repo,  # type: ignore[arg-type]
         fetcher_manager=fetcher,  # type: ignore[arg-type]
-        news_manager=_NewsStub(),  # type: ignore[arg-type]
+        news_manager=(news_manager or _NewsStub()),  # type: ignore[arg-type]
         analyzer=_AnalyzerStub(),  # type: ignore[arg-type]
     )
     return pipeline, fetcher, repo
@@ -144,3 +160,32 @@ def test_pipeline_runs_closed_market_when_guard_disabled(monkeypatch) -> None:  
     assert fetcher.daily_calls == 1
     assert fetcher.quote_calls == 1
     assert len(repo.saved_reports) == 1
+
+
+def test_pipeline_persists_context_snapshot_and_news(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "daily_etf_analysis.pipelines.daily_pipeline.is_market_open_today",
+        lambda _market: True,
+    )
+    pipeline, _, repo = _build_pipeline(news_manager=_NewsWithItemsStub())
+
+    results = pipeline.run(
+        task_id="t3",
+        symbols=["CN:159659"],
+        force_refresh=True,
+        skip_market_guard=False,
+    )
+
+    assert len(results) == 1
+    saved = repo.saved_reports[0]
+    snapshot = saved["context_snapshot"]
+    assert isinstance(snapshot, dict)
+    assert snapshot["symbol"] == "CN:159659"
+    assert snapshot["market"] == "CN"
+    assert snapshot["benchmark_index"] == "NDX"
+    assert snapshot["force_refresh"] is True
+    assert snapshot["news_provider"] == "mock-news"
+
+    news_items = saved["news_items"]
+    assert isinstance(news_items, list)
+    assert news_items[0]["title"] == "Macro update"

@@ -6,8 +6,8 @@ from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.notifications.base import NotificationResult
 
 
-class FeishuNotifier:
-    channel = "feishu"
+class WechatNotifier:
+    channel = "wechat"
 
     def __init__(
         self,
@@ -17,7 +17,7 @@ class FeishuNotifier:
         timeout_seconds: float = 10.0,
     ) -> None:
         self.settings = settings or get_settings()
-        self.webhook_url = webhook_url or self.settings.feishu_webhook_url
+        self.webhook_url = webhook_url or self.settings.wechat_webhook_url
         self.timeout_seconds = timeout_seconds
 
     def is_enabled(self) -> bool:
@@ -28,15 +28,8 @@ class FeishuNotifier:
             return NotificationResult(sent=False, reason="disabled")
 
         payload = {
-            "msg_type": "post",
-            "content": {
-                "post": {
-                    "zh_cn": {
-                        "title": title,
-                        "content": [[{"tag": "text", "text": markdown}]],
-                    }
-                }
-            },
+            "msgtype": "markdown",
+            "markdown": {"content": f"# {title}\n\n{markdown}"},
         }
         try:
             response = httpx.post(

@@ -163,3 +163,62 @@ def test_health() -> None:
     resp = client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_write_endpoints_require_auth_when_enabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+
+    monkeypatch.setenv("API_AUTH_ENABLED", "true")
+    monkeypatch.setenv("API_ADMIN_TOKEN", "secret-token")
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
+    settings_module.reload_settings()
+
+    fake_service = _FakeService()
+    monkeypatch.setattr(router_module, "_service", lambda: fake_service)
+    client = TestClient(app)
+
+    run_resp = client.post("/api/v1/analysis/run", json={"symbols": ["CN:159659"]})
+    assert run_resp.status_code == 401
+
+    wrong_token = {"Authorization": "Bearer wrong"}
+    run_forbidden = client.post(
+        "/api/v1/analysis/run",
+        json={"symbols": ["CN:159659"]},
+        headers=wrong_token,
+    )
+    assert run_forbidden.status_code == 403
+
+    headers = {"Authorization": "Bearer secret-token"}
+    run_ok = client.post(
+        "/api/v1/analysis/run",
+        json={"symbols": ["CN:159659"]},
+        headers=headers,
+    )
+    assert run_ok.status_code == 200
+
+    etfs_resp = client.put("/api/v1/etfs", json={"symbols": ["CN:159659"]})
+    assert etfs_resp.status_code == 401
+
+    etfs_ok = client.put(
+        "/api/v1/etfs",
+        json={"symbols": ["CN:159659"]},
+        headers=headers,
+    )
+    assert etfs_ok.status_code == 200
+
+    mappings_resp = client.put(
+        "/api/v1/index-mappings",
+        json={"mappings": {"NDX": ["US:QQQ"]}},
+    )
+    assert mappings_resp.status_code == 401
+
+    mappings_ok = client.put(
+        "/api/v1/index-mappings",
+        json={"mappings": {"NDX": ["US:QQQ"]}},
+        headers=headers,
+    )
+    assert mappings_ok.status_code == 200
+
+    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+    settings_module.reload_settings()
