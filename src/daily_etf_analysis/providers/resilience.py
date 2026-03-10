@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 from daily_etf_analysis.config.settings import Settings
+from daily_etf_analysis.observability.metrics import inc_provider_call
 
 T = TypeVar("T")
 
@@ -158,6 +159,7 @@ def run_with_resilience(
             "request rejected."
         )
         _STATS_REGISTRY.record_failure(provider, operation, error)
+        inc_provider_call(provider, operation, "failed")
         raise RuntimeError(error)
 
     retries = 0
@@ -166,11 +168,13 @@ def run_with_resilience(
             value = call()
             breaker.record_success()
             _STATS_REGISTRY.record_success(provider, operation)
+            inc_provider_call(provider, operation, "success")
             _STATS_REGISTRY.set_circuit_state(provider, operation, breaker.state)
             return value
         except Exception as exc:  # noqa: BLE001
             breaker.record_failure()
             _STATS_REGISTRY.record_failure(provider, operation, str(exc))
+            inc_provider_call(provider, operation, "failed")
             _STATS_REGISTRY.set_circuit_state(provider, operation, breaker.state)
             if retries >= settings.provider_max_retries:
                 raise

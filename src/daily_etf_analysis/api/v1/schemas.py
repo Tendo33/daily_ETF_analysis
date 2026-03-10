@@ -193,3 +193,12 @@ class SystemConfigAuditItemResponse(BaseModel):
     action: str
     changes: dict[str, Any]
     created_at: str
+
+
+class LifecycleCleanupResponse(BaseModel):
+    dry_run: bool
+    actor: str
+    executed_at: str
+    retention_days: dict[str, int]
+    impacted: dict[str, int]
+    deleted: dict[str, int]

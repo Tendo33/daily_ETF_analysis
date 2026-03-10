@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from daily_etf_analysis.config.settings import Settings, get_settings
+from daily_etf_analysis.observability.metrics import inc_scheduler_run
 from daily_etf_analysis.services.analysis_service import AnalysisService
 
 logger = logging.getLogger(__name__)
@@ -72,11 +73,16 @@ class EtfScheduler:
             if self._on_run is not None:
                 try:
                     self._on_run(market, symbols)
+                    inc_scheduler_run(market, "success")
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Scheduler callback failed: %s", exc)
+                    inc_scheduler_run(market, "failed")
             else:
                 self.service.run_analysis(symbols=symbols, force_refresh=False)
+                inc_scheduler_run(market, "success")
             logger.info("Scheduler triggered market=%s symbols=%s", market, symbols)
+        else:
+            inc_scheduler_run(market, "skipped")
         self._last_run_marker.add(marker)
 
     def _log_next_runs(

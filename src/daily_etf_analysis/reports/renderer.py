@@ -6,6 +6,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
 from daily_etf_analysis.config.settings import get_settings
+from daily_etf_analysis.observability.metrics import inc_report_render
 
 
 def render_daily_report_markdown(
@@ -41,6 +42,7 @@ def render_daily_report_markdown(
             history_by_symbol=history_by_symbol,
         )
         if template_markdown:
+            inc_report_render("template")
             return template_markdown
 
     top_lines = []
@@ -88,6 +90,7 @@ def render_daily_report_markdown(
     if history_by_symbol:
         history_block = _render_history_section(history_by_symbol)
 
+    inc_report_render("fallback")
     return (
         "# Daily ETF Analysis Report\n\n"
         "## Summary\n"
@@ -207,9 +210,20 @@ def _render_industry_lines(industry_rows: list[dict[str, Any]]) -> str:
         avg_score = row.get("avg_score")
         top_symbol = row.get("top_symbol") or "-"
         action_counts = row.get("action_counts", {})
+        recommend_level = row.get("recommend_level", "-")
+        recommend_score = row.get("recommend_score", "-")
+        trend_change_count = row.get("trend_change_count", 0)
+        risk_top = row.get("risk_top", [])
         action_line = ", ".join(f"{k}={v}" for k, v in action_counts.items()) or "-"
+        risk_text = "; ".join(
+            f"{item.get('alert', '-')}({item.get('count', 0)})" for item in risk_top
+        )
+        if not risk_text:
+            risk_text = "-"
         lines.append(
-            f"- {industry}: count={count}, avg_score={avg_score}, top={top_symbol}, actions={action_line}"
+            f"- {industry}: count={count}, avg_score={avg_score}, top={top_symbol}, "
+            f"actions={action_line}, recommend={recommend_level}({recommend_score}), "
+            f"trend_changes={trend_change_count}, risk_top={risk_text}"
         )
     return "\n".join(lines)
 

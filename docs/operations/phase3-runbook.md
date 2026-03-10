@@ -65,3 +65,7 @@ uv run ruff format --check src tests scripts
 uv run mypy src
 uv run pytest
 ```
+
+## 7. Phase 4 Handoff
+
+- Phase 4 production hardening runbook: `docs/operations/phase4-runbook.md`

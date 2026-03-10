@@ -25,7 +25,7 @@ def test_task_status_flow(tmp_path) -> None:  # type: ignore[no-untyped-def]
     manager = TaskManager(repository=repo, pipeline=_PipelineStub())  # type: ignore[arg-type]
 
     task = manager.submit(["CN:159659"], force_refresh=False)
-    assert task.status.value == "pending"
+    assert task.status.value == "queued"
 
     deadline = time.time() + 3
     current = None
@@ -37,3 +37,4 @@ def test_task_status_flow(tmp_path) -> None:  # type: ignore[no-untyped-def]
 
     assert current is not None
     assert current.status.value == "completed"
+    manager.shutdown()

@@ -14,6 +14,10 @@ from daily_etf_analysis.notifications.feishu import FeishuNotifier
 from daily_etf_analysis.notifications.markdown_image import markdown_to_png
 from daily_etf_analysis.notifications.telegram import TelegramNotifier
 from daily_etf_analysis.notifications.wechat import WechatNotifier
+from daily_etf_analysis.observability.metrics import (
+    inc_md2img,
+    inc_notification_delivery,
+)
 
 
 class NotificationManager:
@@ -46,11 +50,13 @@ class NotificationManager:
                 channel_results[channel] = NotificationResult(
                     sent=False, reason="disabled"
                 )
+                inc_notification_delivery(channel, "disabled")
                 continue
             if not notifier.is_enabled():
                 channel_results[channel] = NotificationResult(
                     sent=False, reason="disabled"
                 )
+                inc_notification_delivery(channel, "disabled")
                 continue
             try:
                 if channel in image_channels:
@@ -64,11 +70,16 @@ class NotificationManager:
                         channel_results[channel] = send_image(
                             title, image_bytes, filename="daily_etf_report.png"
                         )
+                        if channel_results[channel].sent:
+                            inc_md2img(channel, "success")
+                        else:
+                            inc_md2img(channel, "failed")
                     else:
                         if image_bytes is None:
                             logging.getLogger(__name__).warning(
                                 "Markdown-to-image skipped for channel=%s", channel
                             )
+                            inc_md2img(channel, "failed")
                         channel_results[channel] = notifier.send_markdown(
                             title, markdown
                         )
@@ -78,6 +89,10 @@ class NotificationManager:
                 channel_results[channel] = NotificationResult(
                     sent=False, reason=str(exc)
                 )
+            delivery_status = "success" if channel_results[channel].sent else "failed"
+            if channel_results[channel].reason == "disabled":
+                delivery_status = "disabled"
+            inc_notification_delivery(channel, delivery_status)
 
         if not channel_results:
             sent = False

@@ -57,7 +57,7 @@
 ### Industry Summary
 {% if market_review.industry %}
 {% for row in market_review.industry %}
-- {{ row.industry }}: count={{ row.count }}, avg_score={{ row.avg_score }}, top={{ row.top_symbol }}, actions={{ row.action_counts }}
+- {{ row.industry }}: count={{ row.count }}, avg_score={{ row.avg_score }}, top={{ row.top_symbol }}, actions={{ row.action_counts }}, recommend={{ row.recommend_level }}({{ row.recommend_score }}), trend_changes={{ row.trend_change_count }}, risk_top={{ row.risk_top }}
 {% endfor %}
 {% else %}
 - No industry mapping

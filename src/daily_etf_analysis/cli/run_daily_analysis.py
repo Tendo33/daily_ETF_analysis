@@ -133,15 +133,20 @@ def run_daily_analysis(
 
     report_date = service.get_task_report_date(task.task_id) or date.today()
     report_rows = service.get_daily_report(report_date, market=report_market)
-    market_review = build_market_review(
-        report_rows, industry_map=service.settings.industry_map
-    )
     history_by_symbol: dict[str, list[dict[str, Any]]] = {}
     if service.settings.report_history_compare_n > 0:
         history_by_symbol = service.get_recent_signals(
             symbols=selected_symbols,
             limit=service.settings.report_history_compare_n,
         )
+    market_review = build_market_review(
+        report_rows,
+        industry_map=service.settings.industry_map,
+        history_by_symbol=history_by_symbol,
+        trend_window_days=service.settings.industry_trend_window_days,
+        risk_top_n=service.settings.industry_risk_top_n,
+        recommend_weights=service.settings.industry_recommend_weights,
+    )
     report_path = _write_json_report(
         output_dir=output_dir,
         report_date=report_date,

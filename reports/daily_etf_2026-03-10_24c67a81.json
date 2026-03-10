@@ -1,0 +1,21 @@
+{
+  "task_id": "24c67a81f9b84afcb8942f6407f0313b",
+  "status": "running",
+  "report_date": "2026-03-10",
+  "market": "all",
+  "symbols": [
+    "CN:159659"
+  ],
+  "report_rows": [],
+  "market_review": {
+    "total": 0,
+    "avg_score": null,
+    "trend_counts": {},
+    "action_counts": {},
+    "top": [],
+    "bottom": [],
+    "risk_alerts": [],
+    "industry": []
+  },
+  "history_by_symbol": {}
+}

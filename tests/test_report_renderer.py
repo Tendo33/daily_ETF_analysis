@@ -97,6 +97,10 @@ def test_renderer_industry_section(monkeypatch) -> None:
                     "avg_score": 60,
                     "top_symbol": "CN:159659",
                     "action_counts": {"buy": 1},
+                    "recommend_level": "overweight",
+                    "recommend_score": 0.65,
+                    "trend_change_count": 1,
+                    "risk_top": [{"alert": "liquidity_low", "count": 2}],
                 }
             ],
         },
@@ -104,3 +108,5 @@ def test_renderer_industry_section(monkeypatch) -> None:
 
     assert "Industry Summary" in markdown
     assert "Tech" in markdown
+    assert "overweight" in markdown
+    assert "trend_changes=1" in markdown

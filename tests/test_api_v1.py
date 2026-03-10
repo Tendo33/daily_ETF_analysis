@@ -26,7 +26,11 @@ class _FakeService:
         )
 
     def run_analysis(  # type: ignore[no-untyped-def]
-        self, symbols=None, force_refresh=False, skip_market_guard=False
+        self,
+        symbols=None,
+        force_refresh=False,
+        skip_market_guard=False,
+        request_id=None,
     ):
         self.task.symbols = symbols or self.task.symbols
         return self.task
@@ -107,6 +111,16 @@ class _FakeService:
             }
         ]
 
+    def cleanup_data_lifecycle(self, *, dry_run: bool, actor: str):  # type: ignore[no-untyped-def]
+        return {
+            "dry_run": dry_run,
+            "actor": actor,
+            "executed_at": datetime.now(UTC).isoformat(),
+            "retention_days": {"tasks": 30, "reports": 60, "quotes": 14},
+            "impacted": {"tasks": 0, "reports": 0, "quotes": 0},
+            "deleted": {"tasks": 0, "reports": 0, "quotes": 0},
+        }
+
 
 def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
@@ -156,6 +170,10 @@ def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     provider_health = client.get("/api/v1/system/provider-health")
     assert provider_health.status_code == 200
     assert provider_health.json()[0]["provider"] == "efinance"
+
+    lifecycle_resp = client.post("/api/v1/system/lifecycle/cleanup?dry_run=true")
+    assert lifecycle_resp.status_code == 200
+    assert lifecycle_resp.json()["dry_run"] is True
 
 
 def test_health() -> None:

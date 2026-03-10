@@ -1037,6 +1037,73 @@ class EtfRepository:
                 )
             return latest
 
+    def count_expired_records(
+        self,
+        *,
+        task_created_before: datetime,
+        report_created_before: datetime,
+        quote_time_before: datetime,
+    ) -> dict[str, int]:
+        with self.session() as db:
+            task_count = int(
+                db.execute(
+                    select(func.count())
+                    .select_from(AnalysisTaskORM)
+                    .where(AnalysisTaskORM.created_at < task_created_before)
+                ).scalar()
+                or 0
+            )
+            report_count = int(
+                db.execute(
+                    select(func.count())
+                    .select_from(EtfAnalysisReportORM)
+                    .where(EtfAnalysisReportORM.created_at < report_created_before)
+                ).scalar()
+                or 0
+            )
+            quote_count = int(
+                db.execute(
+                    select(func.count())
+                    .select_from(EtfRealtimeQuoteORM)
+                    .where(EtfRealtimeQuoteORM.quote_time < quote_time_before)
+                ).scalar()
+                or 0
+            )
+            return {
+                "tasks": task_count,
+                "reports": report_count,
+                "quotes": quote_count,
+            }
+
+    def delete_expired_records(
+        self,
+        *,
+        task_created_before: datetime,
+        report_created_before: datetime,
+        quote_time_before: datetime,
+    ) -> dict[str, int]:
+        with self.session() as db:
+            deleted_tasks = (
+                db.query(AnalysisTaskORM)
+                .filter(AnalysisTaskORM.created_at < task_created_before)
+                .delete()
+            )
+            deleted_reports = (
+                db.query(EtfAnalysisReportORM)
+                .filter(EtfAnalysisReportORM.created_at < report_created_before)
+                .delete()
+            )
+            deleted_quotes = (
+                db.query(EtfRealtimeQuoteORM)
+                .filter(EtfRealtimeQuoteORM.quote_time < quote_time_before)
+                .delete()
+            )
+            return {
+                "tasks": int(deleted_tasks),
+                "reports": int(deleted_reports),
+                "quotes": int(deleted_quotes),
+            }
+
 
 def _float_or_none(value: object) -> float | None:
     if value is None:

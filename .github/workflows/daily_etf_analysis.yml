@@ -61,6 +61,12 @@ jobs:
       - name: Prepare directories
         run: mkdir -p data logs reports
 
+      - name: Alembic migration probe
+        env:
+          DATABASE_URL: sqlite:///./data/daily_etf_analysis.db
+        run: |
+          uv run alembic upgrade head
+
       - name: Config probe (no secrets)
         env:
           LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}

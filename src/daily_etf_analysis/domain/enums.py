@@ -29,6 +29,7 @@ class Confidence(str, Enum):
 
 
 class TaskStatus(str, Enum):
+    QUEUED = "queued"
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"

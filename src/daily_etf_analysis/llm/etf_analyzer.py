@@ -157,7 +157,7 @@ Rules:
                 payload = json.loads(repaired_payload)
             else:
                 raise ValueError("Repaired JSON payload has unsupported type")
-            parsed = _LlmResultModel.model_validate(payload)
+            parsed: _LlmResultModel = _LlmResultModel.model_validate(payload)
             return EtfAnalysisResult(
                 symbol=symbol,
                 score=parsed.score,

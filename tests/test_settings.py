@@ -39,3 +39,21 @@ def test_default_realtime_source_priority_is_phase2_chain(monkeypatch) -> None: 
         "baostock",
         "yfinance",
     ]
+
+
+def test_csv_env_lists_parse_without_json_decode(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ETF_LIST", "CN:159659,US:QQQ,HK:02800")
+    monkeypatch.setenv("MARKETS_ENABLED", "cn,hk,us")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.etf_list == ["CN:159659", "US:QQQ", "HK:02800"]
+    assert settings.markets_enabled == ["cn", "hk", "us"]
+
+
+def test_json_env_list_still_supported(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ETF_LIST", '["CN:159659","US:QQQ"]')
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.etf_list == ["CN:159659", "US:QQQ"]

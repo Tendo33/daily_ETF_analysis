@@ -14,6 +14,7 @@ from daily_etf_analysis.domain import (
 from daily_etf_analysis.observability import get_provider_health_snapshot
 from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
+from daily_etf_analysis.services.data_lifecycle_service import DataLifecycleService
 from daily_etf_analysis.services.system_config_service import SystemConfigService
 from daily_etf_analysis.services.task_manager import TaskManager
 
@@ -32,12 +33,16 @@ class AnalysisService:
             settings=self.settings, repository=self.repository
         )
         self.system_config_service.set_on_settings_applied(self._apply_runtime_settings)
+        self.data_lifecycle_service = DataLifecycleService(
+            settings=self.settings, repository=self.repository
+        )
 
     def run_analysis(
         self,
         symbols: list[str] | None = None,
         force_refresh: bool = False,
         skip_market_guard: bool = False,
+        request_id: str | None = None,
     ) -> AnalysisTask:
         target_symbols = [
             normalize_symbol(s) for s in (symbols or self.settings.etf_list)
@@ -46,6 +51,7 @@ class AnalysisService:
             target_symbols,
             force_refresh=force_refresh,
             skip_market_guard=skip_market_guard,
+            request_id=request_id,
         )
 
     def list_tasks(self, limit: int = 50) -> list[AnalysisTask]:
@@ -231,6 +237,9 @@ class AnalysisService:
         return self.system_config_service.list_system_config_audit(
             page=page, limit=limit
         )
+
+    def cleanup_data_lifecycle(self, *, dry_run: bool, actor: str) -> dict[str, object]:
+        return self.data_lifecycle_service.cleanup(dry_run=dry_run, actor=actor)
 
     def get_task_report_date(self, task_id: str) -> date | None:
         return self.repository.get_latest_report_trade_date_for_task(task_id)

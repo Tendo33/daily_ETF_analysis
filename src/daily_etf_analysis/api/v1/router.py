@@ -4,7 +4,7 @@ from datetime import date
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from daily_etf_analysis.api.auth import require_admin_token
 from daily_etf_analysis.api.v1.schemas import (
@@ -16,6 +16,7 @@ from daily_etf_analysis.api.v1.schemas import (
     HistoryListResponse,
     IndexComparisonResponse,
     IndexComparisonRowResponse,
+    LifecycleCleanupResponse,
     ProviderHealthResponse,
     ReplaceEtfsRequest,
     ReplaceIndexMappingsRequest,
@@ -43,7 +44,9 @@ def _service() -> AnalysisService:
 
 @router.post("/analysis/run", response_model=RunAnalysisResponse)
 def run_analysis(
-    request: RunAnalysisRequest, _: None = Depends(require_admin_token)
+    request: RunAnalysisRequest,
+    http_request: Request,
+    _: None = Depends(require_admin_token),
 ) -> RunAnalysisResponse:
     settings = get_settings()
     symbols = request.symbols
@@ -54,7 +57,21 @@ def run_analysis(
             for symbol in settings.etf_list
             if symbol.split(":", 1)[0].lower() in allowed_markets
         ]
-    task = _service().run_analysis(symbols=symbols, force_refresh=request.force_refresh)
+    try:
+        task = _service().run_analysis(
+            symbols=symbols,
+            force_refresh=request.force_refresh,
+            request_id=getattr(http_request.state, "request_id", None),
+        )
+    except ValueError as exc:
+        detail = str(exc).lower()
+        if "dedup" in detail:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        if "queue is full" in str(exc).lower():
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return RunAnalysisResponse(task_id=task.task_id, status=task.status.value)
 
 
@@ -349,6 +366,18 @@ def list_system_config_audit(
 ) -> list[SystemConfigAuditItemResponse]:
     rows = _service().list_system_config_audit(page=page, limit=limit)
     return [SystemConfigAuditItemResponse.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/system/lifecycle/cleanup",
+    response_model=LifecycleCleanupResponse,
+)
+def run_lifecycle_cleanup(
+    dry_run: bool = Query(default=True),
+    _: None = Depends(require_admin_token),
+) -> LifecycleCleanupResponse:
+    payload = _service().cleanup_data_lifecycle(dry_run=dry_run, actor="admin")
+    return LifecycleCleanupResponse.model_validate(payload)
 
 
 def _to_float(value: object) -> float | None:

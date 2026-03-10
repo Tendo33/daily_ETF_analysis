@@ -5,11 +5,11 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 load_dotenv(override=False)
 
@@ -25,12 +25,15 @@ def _parse_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+CsvList = Annotated[list[str], NoDecode]
+
+
 class Settings(BaseSettings):
     environment: str = Field(default="development")
     log_level: str = Field(default="INFO")
     log_file: str = Field(default="logs/app.log")
 
-    etf_list: list[str] = Field(
+    etf_list: CsvList = Field(
         default_factory=lambda: ["CN:159659", "US:QQQ", "HK:02800"]
     )
     index_proxy_map: dict[str, list[str]] = Field(
@@ -41,34 +44,34 @@ class Settings(BaseSettings):
         }
     )
     industry_map: dict[str, list[str]] = Field(default_factory=dict)
-    markets_enabled: list[str] = Field(default_factory=lambda: ["cn", "hk", "us"])
+    markets_enabled: CsvList = Field(default_factory=lambda: ["cn", "hk", "us"])
     database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
 
     litellm_model: str = Field(default="")
-    litellm_fallback_models: list[str] = Field(default_factory=list)
+    litellm_fallback_models: CsvList = Field(default_factory=list)
     litellm_config: str | None = Field(default=None)
     llm_channels: str = Field(default="")
     llm_model_list: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
 
     gemini_api_key: str | None = Field(default=None)
-    gemini_api_keys: list[str] = Field(default_factory=list)
+    gemini_api_keys: CsvList = Field(default_factory=list)
     anthropic_api_key: str | None = Field(default=None)
-    anthropic_api_keys: list[str] = Field(default_factory=list)
+    anthropic_api_keys: CsvList = Field(default_factory=list)
     openai_api_key: str | None = Field(default=None)
-    openai_api_keys: list[str] = Field(default_factory=list)
+    openai_api_keys: CsvList = Field(default_factory=list)
     deepseek_api_key: str | None = Field(default=None)
-    deepseek_api_keys: list[str] = Field(default_factory=list)
+    deepseek_api_keys: CsvList = Field(default_factory=list)
     openai_base_url: str | None = Field(default=None)
 
     llm_temperature: float = Field(default=0.7)
     llm_max_tokens: int = Field(default=4096)
     llm_timeout_seconds: int = Field(default=60)
 
-    tavily_api_keys: list[str] = Field(default_factory=list)
+    tavily_api_keys: CsvList = Field(default_factory=list)
     news_max_age_days: int = Field(default=3)
-    news_provider_priority: list[str] = Field(default_factory=lambda: ["tavily"])
+    news_provider_priority: CsvList = Field(default_factory=lambda: ["tavily"])
 
-    realtime_source_priority: list[str] = Field(
+    realtime_source_priority: CsvList = Field(
         default_factory=lambda: [
             "efinance",
             "akshare",
@@ -86,7 +89,7 @@ class Settings(BaseSettings):
     provider_circuit_fail_threshold: int = Field(default=3, ge=1, le=20)
     provider_circuit_reset_seconds: int = Field(default=60, ge=1, le=3600)
 
-    notify_channels: list[str] = Field(default_factory=lambda: ["feishu"])
+    notify_channels: CsvList = Field(default_factory=lambda: ["feishu"])
     feishu_webhook_url: str | None = Field(default=None)
     wechat_webhook_url: str | None = Field(default=None)
     telegram_bot_token: str | None = Field(default=None)
@@ -96,14 +99,35 @@ class Settings(BaseSettings):
     email_username: str | None = Field(default=None)
     email_password: str | None = Field(default=None)
     email_from: str | None = Field(default=None)
-    email_to: list[str] = Field(default_factory=list)
+    email_to: CsvList = Field(default_factory=list)
     report_templates_dir: str = Field(default="templates")
     report_renderer_enabled: bool = Field(default=False)
     report_integrity_enabled: bool = Field(default=True)
     report_history_compare_n: int = Field(default=0, ge=0, le=60)
-    markdown_to_image_channels: list[str] = Field(default_factory=list)
+    markdown_to_image_channels: CsvList = Field(default_factory=list)
     markdown_to_image_max_chars: int = Field(default=15000, ge=1000, le=50000)
     md2img_engine: str = Field(default="imgkit")
+    metrics_enabled: bool = Field(default=True)
+
+    task_max_concurrency: int = Field(default=2, ge=1, le=32)
+    task_queue_max_size: int = Field(default=50, ge=1, le=1000)
+    task_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    task_dedup_window_seconds: int = Field(default=300, ge=0, le=86_400)
+
+    retention_task_days: int = Field(default=30, ge=1, le=3650)
+    retention_report_days: int = Field(default=60, ge=1, le=3650)
+    retention_quote_days: int = Field(default=14, ge=1, le=3650)
+
+    industry_trend_window_days: int = Field(default=5, ge=1, le=60)
+    industry_risk_top_n: int = Field(default=3, ge=1, le=20)
+    industry_recommend_weights: dict[str, float] = Field(
+        default_factory=lambda: {
+            "buy": 1.0,
+            "hold": 0.0,
+            "sell": -1.0,
+            "score_weight": 0.5,
+        }
+    )
 
     api_auth_enabled: bool = Field(default=False)
     api_admin_token: str | None = Field(default=None)
@@ -169,7 +193,15 @@ class Settings(BaseSettings):
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):
-            return _parse_csv(value)
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                parsed = json.loads(text)
+                if not isinstance(parsed, list):
+                    raise ValueError("List value JSON must be an array")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return _parse_csv(text)
         raise ValueError("List value must be list or comma-separated string")
 
     @field_validator("index_proxy_map", mode="before")
@@ -215,6 +247,40 @@ class Settings(BaseSettings):
                 for k, v in parsed.items()
             }
         raise ValueError("Invalid INDUSTRY_MAP value")
+
+    @field_validator("industry_recommend_weights", mode="before")
+    @classmethod
+    def parse_industry_recommend_weights(cls, value: Any) -> dict[str, float]:
+        if value is None:
+            return {
+                "buy": 1.0,
+                "hold": 0.0,
+                "sell": -1.0,
+                "score_weight": 0.5,
+            }
+        payload = value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {
+                    "buy": 1.0,
+                    "hold": 0.0,
+                    "sell": -1.0,
+                    "score_weight": 0.5,
+                }
+            payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("INDUSTRY_RECOMMEND_WEIGHTS must be a JSON object")
+        result = {
+            "buy": float(payload.get("buy", 1.0)),
+            "hold": float(payload.get("hold", 0.0)),
+            "sell": float(payload.get("sell", -1.0)),
+            "score_weight": float(payload.get("score_weight", 0.5)),
+        }
+        score_weight = result["score_weight"]
+        if score_weight < 0 or score_weight > 1:
+            raise ValueError("score_weight must be in [0, 1]")
+        return result
 
     @model_validator(mode="after")
     def finalize_settings(self) -> Settings:

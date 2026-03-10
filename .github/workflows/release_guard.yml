@@ -1,0 +1,48 @@
+name: Release Guard
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Quality gate
+        run: |
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+          uv run mypy src
+          uv run pytest
+
+      - name: Alembic migration probe
+        env:
+          DATABASE_URL: sqlite:///./release_guard_probe.db
+        run: |
+          uv run alembic upgrade head
+
+      - name: Smoke run
+        run: |
+          uv run python scripts/run_daily_analysis.py --symbols CN:159659 --skip-notify --wait-timeout-seconds 120 --poll-interval-seconds 1
+
+      - name: Security baseline scan
+        run: |
+          uv run python scripts/security_scan.py
+
+      - name: Rollback guide
+        run: |
+          echo "Rollback runbook: docs/operations/phase4-runbook.md#rollback-and-recovery"
