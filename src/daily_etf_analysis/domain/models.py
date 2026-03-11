@@ -9,6 +9,7 @@ from daily_etf_analysis.domain.enums import (
     Action,
     Confidence,
     Market,
+    TaskErrorCode,
     TaskStatus,
     Trend,
 )
@@ -78,6 +79,10 @@ class EtfAnalysisResult:
     success: bool = True
     error_message: str | None = None
     raw_response: str | None = None
+    horizon: str = "next_trading_day"
+    rationale: str = ""
+    degraded: bool = False
+    fallback_reason: str | None = None
 
     @classmethod
     def neutral_fallback(cls, symbol: str, error_message: str) -> EtfAnalysisResult:
@@ -93,6 +98,10 @@ class EtfAnalysisResult:
             model_used=None,
             success=False,
             error_message=error_message,
+            horizon="next_trading_day",
+            rationale="Fallback to neutral recommendation due to unavailable model output.",
+            degraded=True,
+            fallback_reason="NEUTRAL_FALLBACK",
         )
 
 
@@ -102,9 +111,34 @@ class AnalysisTask:
     status: TaskStatus
     symbols: list[str]
     force_refresh: bool
+    run_id: str | None = None
     created_at: datetime = field(default_factory=utc_now_naive)
     updated_at: datetime = field(default_factory=utc_now_naive)
     error: str | None = None
+    error_code: TaskErrorCode = TaskErrorCode.NONE
+    skip_reason: str | None = None
+    skipped_symbols: list[str] = field(default_factory=list)
+    analyzed_count: int = 0
+    skipped_count: int = 0
+
+
+@dataclass(slots=True)
+class AnalysisRun:
+    run_id: str
+    status: TaskStatus
+    symbols: list[str]
+    source: str = "manual"
+    market: str = "all"
+    run_window: str | None = None
+    created_at: datetime = field(default_factory=utc_now_naive)
+    updated_at: datetime = field(default_factory=utc_now_naive)
+    completed_at: datetime | None = None
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    failed_tasks: int = 0
+    cancelled_tasks: int = 0
+    decision_quality: dict[str, Any] = field(default_factory=dict)
+    failure_summary: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

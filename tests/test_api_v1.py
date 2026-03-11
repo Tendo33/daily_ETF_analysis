@@ -2,46 +2,95 @@ from __future__ import annotations
 
 import importlib
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from daily_etf_analysis.api.app import app
-from daily_etf_analysis.domain import (
-    AnalysisTask,
-    IndexComparisonResult,
-    IndexComparisonRow,
-    TaskStatus,
-)
+from daily_etf_analysis.domain import IndexComparisonResult, IndexComparisonRow
 
 
 class _FakeService:
     def __init__(self) -> None:
-        self.task = AnalysisTask(
-            task_id="task-1",
-            status=TaskStatus.PENDING,
-            symbols=["CN:159659"],
-            force_refresh=False,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+        self.run_calls = 0
+
+    def create_analysis_run(self, **kwargs):  # type: ignore[no-untyped-def]
+        self.run_calls += 1
+        symbols = kwargs.get("symbols") or ["CN:159659"]
+        if kwargs.get("markets") == ["cn"] and symbols == ["US:QQQ"]:
+            raise ValueError("No symbols resolved for run.")
+        return SimpleNamespace(
+            run_id="run-1",
+            status=SimpleNamespace(value="processing"),
         )
 
-    def run_analysis(  # type: ignore[no-untyped-def]
-        self,
-        symbols=None,
-        force_refresh=False,
-        skip_market_guard=False,
-        request_id=None,
-    ):
-        self.task.symbols = symbols or self.task.symbols
-        return self.task
+    def build_run_contract(self, run_id: str):  # type: ignore[no-untyped-def]
+        if run_id != "run-1":
+            return None
+        now = datetime.now(UTC).isoformat()
+        return {
+            "run_id": "run-1",
+            "status": "processing",
+            "source": "api",
+            "market": "all",
+            "run_window": "all:2026-03-11",
+            "symbols": ["CN:159659"],
+            "created_at": now,
+            "updated_at": now,
+            "completed_at": None,
+            "total_tasks": 1,
+            "completed_tasks": 0,
+            "failed_tasks": 0,
+            "cancelled_tasks": 0,
+            "decision_quality": {"total": 1, "success_rate": 0.0},
+            "failures": [],
+            "audit_logs": [],
+        }
 
-    def list_tasks(self, limit=50):  # type: ignore[no-untyped-def]
-        return [self.task]
+    def get_daily_report_contract(self, **kwargs):  # type: ignore[no-untyped-def]
+        return {
+            "run_summary": {
+                "run_id": kwargs.get("run_id"),
+                "date": "2026-03-10",
+                "market": kwargs.get("market", "all"),
+                "total_symbols": 1,
+                "generated_at": "2026-03-11",
+            },
+            "symbol_results": [
+                {
+                    "run_id": kwargs.get("run_id", "run-1"),
+                    "symbol": "CN:159659",
+                    "action": "hold",
+                    "confidence": "low",
+                    "horizon": "next_trading_day",
+                    "risk_alerts": [],
+                    "rationale": "fallback",
+                    "degraded": True,
+                    "fallback_reason": "NEUTRAL_FALLBACK",
+                }
+            ],
+            "decision_quality": {
+                "total": 1,
+                "degraded_count": 1,
+                "fallback_count": 1,
+                "success_rate": 0.0,
+            },
+            "failures": [],
+        }
 
-    def get_task(self, task_id: str):  # type: ignore[no-untyped-def]
-        if task_id == self.task.task_id:
-            return self.task
-        return None
+    def list_history_signals(self, **kwargs):  # type: ignore[no-untyped-def]
+        symbol = kwargs.get("symbol")
+        if symbol == "XX:123":
+            raise ValueError("invalid symbol")
+        return [
+            {
+                "run_id": kwargs.get("run_id", "run-1"),
+                "symbol": symbol or "CN:159659",
+                "trade_date": "2026-03-10",
+                "action": "hold",
+            }
+        ]
 
     def list_etfs(self):  # type: ignore[no-untyped-def]
         return []
@@ -60,15 +109,10 @@ class _FakeService:
 
     def get_history(self, symbol, days=120):  # type: ignore[no-untyped-def]
         return [
-            {"symbol": symbol, "trade_date": date.today().isoformat(), "close": 1.0}
-        ]
-
-    def get_daily_report(self, target_date, market=None):  # type: ignore[no-untyped-def]
-        return [
             {
-                "symbol": "CN:159659",
-                "trade_date": target_date.isoformat(),
-                "market": market,
+                "symbol": symbol,
+                "trade_date": date.today().isoformat(),
+                "close": 1.0,
             }
         ]
 
@@ -122,23 +166,43 @@ class _FakeService:
         }
 
 
-def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+@pytest.fixture
+def client_with_fake_service(monkeypatch):  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
+    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+    settings_module.reload_settings()
 
     fake_service = _FakeService()
     monkeypatch.setattr(router_module, "_service", lambda: fake_service)
     client = TestClient(app)
+    return client, fake_service
 
-    run_resp = client.post("/api/v1/analysis/run", json={"symbols": ["CN:159659"]})
+
+def test_api_v1_core_endpoints(client_with_fake_service) -> None:
+    client, _ = client_with_fake_service
+
+    create_resp = client.post("/api/v1/analysis/runs", json={"symbols": ["CN:159659"]})
+    assert create_resp.status_code == 202
+    assert create_resp.json()["run_id"] == "run-1"
+
+    run_resp = client.get("/api/v1/analysis/runs/run-1")
     assert run_resp.status_code == 200
-    assert run_resp.json()["task_id"] == "task-1"
+    assert run_resp.json()["status"] == "processing"
 
-    tasks_resp = client.get("/api/v1/analysis/tasks")
-    assert tasks_resp.status_code == 200
-    assert len(tasks_resp.json()) == 1
+    report_resp = client.get(
+        "/api/v1/reports/daily",
+        params={"date": date.today().isoformat(), "market": "all"},
+    )
+    assert report_resp.status_code == 200
+    assert report_resp.json()["decision_quality"]["degraded_count"] == 1
 
-    task_resp = client.get("/api/v1/analysis/tasks/task-1")
-    assert task_resp.status_code == 200
+    history_signals = client.get(
+        "/api/v1/history/signals", params={"symbol": "CN:159659"}
+    )
+    assert history_signals.status_code == 200
+    assert history_signals.json()["items"][0]["symbol"] == "CN:159659"
 
     quote_resp = client.get("/api/v1/etfs/CN:159659/quote")
     assert quote_resp.status_code == 200
@@ -147,25 +211,16 @@ def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     history_resp = client.get("/api/v1/etfs/CN:159659/history?days=0")
     assert history_resp.status_code == 422
 
-    report_resp = client.get(
-        f"/api/v1/reports/daily?date={date.today().isoformat()}&market=all"
-    )
-    assert report_resp.status_code == 200
-
     compare_resp = client.get(
         f"/api/v1/index-comparisons?index_symbol=NDX&date={date.today().isoformat()}"
     )
     assert compare_resp.status_code == 200
     assert compare_resp.json()["index_symbol"] == "NDX"
-    assert compare_resp.json()["rows"][0]["symbol"] == "US:QQQ"
 
     compare_not_found = client.get(
         f"/api/v1/index-comparisons?index_symbol=MISSING&date={date.today().isoformat()}"
     )
     assert compare_not_found.status_code == 404
-
-    compare_bad_request = client.get("/api/v1/index-comparisons")
-    assert compare_bad_request.status_code == 422
 
     provider_health = client.get("/api/v1/system/provider-health")
     assert provider_health.status_code == 200
@@ -176,6 +231,61 @@ def test_api_endpoints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     assert lifecycle_resp.json()["dry_run"] is True
 
 
+def test_removed_endpoints_return_404(client_with_fake_service) -> None:
+    client, _ = client_with_fake_service
+
+    removed_paths = [
+        ("post", "/api/v1/analysis/run"),
+        ("get", "/api/v1/analysis/tasks"),
+        ("get", "/api/v1/analysis/tasks/task-1"),
+        ("get", "/api/v1/analysis/status/task-1"),
+        ("get", "/api/v1/analysis/tasks/stream"),
+        ("get", "/api/v1/history"),
+        ("get", "/api/v1/history/1"),
+        ("get", "/api/v1/history/1/news"),
+    ]
+
+    for method, path in removed_paths:
+        if method == "post":
+            response = client.post(path, json={"symbols": ["CN:159659"]})
+        else:
+            response = client.get(path)
+        assert response.status_code == 404
+
+
+def test_create_run_without_resolved_symbols_returns_422(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
+    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+    settings_module.reload_settings()
+
+    fake_service = _FakeService()
+    monkeypatch.setattr(router_module, "_service", lambda: fake_service)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/v1/analysis/runs",
+        json={"markets": ["cn"], "symbols": ["US:QQQ"]},
+    )
+    assert resp.status_code == 422
+    payload = resp.json()["detail"]
+    assert payload["code"] == "INVALID_RUN_REQUEST"
+    assert fake_service.run_calls == 1
+
+
+def test_run_not_found_and_invalid_history_symbol(client_with_fake_service) -> None:
+    client, _ = client_with_fake_service
+
+    not_found = client.get("/api/v1/analysis/runs/missing")
+    assert not_found.status_code == 404
+    assert not_found.json()["detail"]["code"] == "RUN_NOT_FOUND"
+
+    invalid_history = client.get("/api/v1/history/signals", params={"symbol": "XX:123"})
+    assert invalid_history.status_code == 422
+    assert invalid_history.json()["detail"]["code"] == "INVALID_HISTORY_QUERY"
+
+
 def test_health() -> None:
     client = TestClient(app)
     resp = client.get("/api/health")
@@ -183,60 +293,50 @@ def test_health() -> None:
     assert resp.json() == {"status": "ok"}
 
 
-def test_write_endpoints_require_auth_when_enabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_auth_required_when_enabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
-
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     monkeypatch.setenv("API_AUTH_ENABLED", "true")
     monkeypatch.setenv("API_ADMIN_TOKEN", "secret-token")
-    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     settings_module.reload_settings()
+    try:
+        fake_service = _FakeService()
+        monkeypatch.setattr(router_module, "_service", lambda: fake_service)
+        client = TestClient(app)
 
-    fake_service = _FakeService()
-    monkeypatch.setattr(router_module, "_service", lambda: fake_service)
-    client = TestClient(app)
+        run_resp = client.post("/api/v1/analysis/runs", json={"symbols": ["CN:159659"]})
+        assert run_resp.status_code == 401
 
-    run_resp = client.post("/api/v1/analysis/run", json={"symbols": ["CN:159659"]})
-    assert run_resp.status_code == 401
+        run_forbidden = client.post(
+            "/api/v1/analysis/runs",
+            json={"symbols": ["CN:159659"]},
+            headers={"Authorization": "Bearer wrong"},
+        )
+        assert run_forbidden.status_code == 403
 
-    wrong_token = {"Authorization": "Bearer wrong"}
-    run_forbidden = client.post(
-        "/api/v1/analysis/run",
-        json={"symbols": ["CN:159659"]},
-        headers=wrong_token,
-    )
-    assert run_forbidden.status_code == 403
+        headers = {"Authorization": "Bearer secret-token"}
+        run_ok = client.post(
+            "/api/v1/analysis/runs",
+            json={"symbols": ["CN:159659"]},
+            headers=headers,
+        )
+        assert run_ok.status_code == 202
 
-    headers = {"Authorization": "Bearer secret-token"}
-    run_ok = client.post(
-        "/api/v1/analysis/run",
-        json={"symbols": ["CN:159659"]},
-        headers=headers,
-    )
-    assert run_ok.status_code == 200
+        etfs_resp = client.put("/api/v1/etfs", json={"symbols": ["CN:159659"]})
+        assert etfs_resp.status_code == 401
 
-    etfs_resp = client.put("/api/v1/etfs", json={"symbols": ["CN:159659"]})
-    assert etfs_resp.status_code == 401
+        etfs_ok = client.put(
+            "/api/v1/etfs",
+            json={"symbols": ["CN:159659"]},
+            headers=headers,
+        )
+        assert etfs_ok.status_code == 200
 
-    etfs_ok = client.put(
-        "/api/v1/etfs",
-        json={"symbols": ["CN:159659"]},
-        headers=headers,
-    )
-    assert etfs_ok.status_code == 200
-
-    mappings_resp = client.put(
-        "/api/v1/index-mappings",
-        json={"mappings": {"NDX": ["US:QQQ"]}},
-    )
-    assert mappings_resp.status_code == 401
-
-    mappings_ok = client.put(
-        "/api/v1/index-mappings",
-        json={"mappings": {"NDX": ["US:QQQ"]}},
-        headers=headers,
-    )
-    assert mappings_ok.status_code == 200
-
-    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
-    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
-    settings_module.reload_settings()
+        history_resp = client.get("/api/v1/history/signals")
+        assert history_resp.status_code == 401
+        history_ok = client.get("/api/v1/history/signals", headers=headers)
+        assert history_ok.status_code == 200
+    finally:
+        monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+        monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+        settings_module.reload_settings()

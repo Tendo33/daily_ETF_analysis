@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from dataclasses import dataclass
 from datetime import date
 
 from daily_etf_analysis.config.settings import Settings, get_settings
@@ -19,6 +21,14 @@ from daily_etf_analysis.repositories import EtfRepository
 from daily_etf_analysis.services.factor_engine import compute_factors
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class PipelineRunOutcome:
+    analyzed_count: int
+    skipped_count: int
+    skipped_symbols: list[str]
+    skip_reason: str | None = None
 
 
 class DailyPipeline:
@@ -67,14 +77,21 @@ class DailyPipeline:
         self,
         task_id: str,
         symbols: list[str] | None = None,
+        run_id: str | None = None,
         force_refresh: bool = False,
         skip_market_guard: bool = False,
-    ) -> list[EtfAnalysisResult]:
+        cancel_event: threading.Event | None = None,
+    ) -> PipelineRunOutcome:
         normalized_symbols = [
             normalize_symbol(s) for s in (symbols or self.settings.etf_list)
         ]
         results: list[EtfAnalysisResult] = []
+        skipped_symbols: list[str] = []
+        skip_reason: str | None = None
         for symbol in normalized_symbols:
+            if cancel_event is not None and cancel_event.is_set():
+                skip_reason = "Task cancelled before completion"
+                break
             market, code = split_symbol(symbol)
             if (
                 not skip_market_guard
@@ -86,12 +103,19 @@ class DailyPipeline:
                     symbol,
                     market.value,
                 )
+                skipped_symbols.append(symbol)
                 continue
             try:
                 bars, _ = self.fetcher_manager.get_daily_bars(symbol=symbol, days=120)
+                if cancel_event is not None and cancel_event.is_set():
+                    skip_reason = "Task cancelled before completion"
+                    break
                 self.repository.save_daily_bars(bars)
                 quote, _ = self.fetcher_manager.get_realtime_quote(symbol=symbol)
                 if quote is not None:
+                    if cancel_event is not None and cancel_event.is_set():
+                        skip_reason = "Task cancelled before completion"
+                        break
                     self.repository.save_realtime_quote(quote)
 
                 factors = compute_factors(bars=bars, quote=quote)
@@ -126,10 +150,17 @@ class DailyPipeline:
                         for item in news
                     ],
                 )
+                if cancel_event is not None and cancel_event.is_set():
+                    skip_reason = "Task cancelled before completion"
+                    break
                 result = self.analyzer.analyze(context)
+                if cancel_event is not None and cancel_event.is_set():
+                    skip_reason = "Task cancelled before completion"
+                    break
                 trade_date = bars[-1].trade_date if bars else date.today()
                 self.repository.save_analysis_report(
                     task_id=task_id,
+                    run_id=run_id,
                     symbol=symbol,
                     trade_date=trade_date,
                     factors=context.factors,
@@ -145,10 +176,15 @@ class DailyPipeline:
                 )
                 results.append(result)
             except Exception as exc:  # noqa: BLE001
+                if cancel_event is not None and cancel_event.is_set():
+                    skip_reason = "Task cancelled before completion"
+                    break
                 logger.exception("Pipeline failed for %s: %s", symbol, exc)
                 fallback = EtfAnalysisResult.neutral_fallback(symbol, str(exc))
+                fallback.fallback_reason = "PROVIDER_FAILED"
                 self.repository.save_analysis_report(
                     task_id=task_id,
+                    run_id=run_id,
                     symbol=symbol,
                     trade_date=date.today(),
                     factors={"data_quality": "error"},
@@ -163,7 +199,12 @@ class DailyPipeline:
                     news_items=[],
                 )
                 results.append(fallback)
-        return results
+        return PipelineRunOutcome(
+            analyzed_count=len(results),
+            skipped_count=len(skipped_symbols),
+            skipped_symbols=skipped_symbols,
+            skip_reason=skip_reason,
+        )
 
 
 def _build_context_snapshot(

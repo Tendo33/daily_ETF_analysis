@@ -16,17 +16,21 @@ class _SpyService:
         return None
 
 
-def test_scheduler_respects_markets_enabled() -> None:
+def test_scheduler_respects_markets_enabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     settings = Settings(
         schedule_enabled=True,
         markets_enabled=["cn"],
         etf_list=["CN:159659", "US:QQQ"],
-        schedule_cron_cn="0 0 9 * * 1-5",
-        schedule_cron_us="0 0 9 * * 1-5",
+        schedule_cron_cn="0 30 16 * * 1-5",
+        schedule_cron_us="0 30 16 * * 1-5",
     )
     service = _SpyService()
     scheduler = EtfScheduler(service=service, settings=settings)
-    now = datetime(2026, 3, 9, 9, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    now = datetime(2026, 3, 9, 16, 30, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(
+        "daily_etf_analysis.scheduler.scheduler.is_market_open_today",
+        lambda _market: True,
+    )
 
     scheduler._maybe_run("cn", settings.schedule_cron_cn, now)
     scheduler._maybe_run("us", settings.schedule_cron_us, now)
@@ -34,16 +38,20 @@ def test_scheduler_respects_markets_enabled() -> None:
     assert service.calls == [["CN:159659"]]
 
 
-def test_scheduler_deduplicates_same_minute() -> None:
+def test_scheduler_deduplicates_same_minute(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     settings = Settings(
         schedule_enabled=True,
         markets_enabled=["cn"],
         etf_list=["CN:159659"],
-        schedule_cron_cn="0 0 9 * * 1-5",
+        schedule_cron_cn="0 30 16 * * 1-5",
     )
     service = _SpyService()
     scheduler = EtfScheduler(service=service, settings=settings)
-    now = datetime(2026, 3, 9, 9, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    now = datetime(2026, 3, 9, 16, 30, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(
+        "daily_etf_analysis.scheduler.scheduler.is_market_open_today",
+        lambda _market: True,
+    )
 
     scheduler._maybe_run("cn", settings.schedule_cron_cn, now)
     scheduler._maybe_run("cn", settings.schedule_cron_cn, now)
@@ -51,12 +59,12 @@ def test_scheduler_deduplicates_same_minute() -> None:
     assert len(service.calls) == 1
 
 
-def test_scheduler_uses_callback_when_provided() -> None:
+def test_scheduler_uses_callback_when_provided(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     settings = Settings(
         schedule_enabled=True,
         markets_enabled=["cn"],
         etf_list=["CN:159659"],
-        schedule_cron_cn="0 0 9 * * 1-5",
+        schedule_cron_cn="0 30 16 * * 1-5",
     )
     service = _SpyService()
     callback_calls: list[tuple[str, list[str]]] = []
@@ -65,11 +73,35 @@ def test_scheduler_uses_callback_when_provided() -> None:
         callback_calls.append((market, list(symbols)))
 
     scheduler = EtfScheduler(service=service, settings=settings, on_run=on_run)
-    now = datetime(2026, 3, 9, 9, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    now = datetime(2026, 3, 9, 16, 30, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(
+        "daily_etf_analysis.scheduler.scheduler.is_market_open_today",
+        lambda _market: True,
+    )
 
     scheduler._maybe_run("cn", settings.schedule_cron_cn, now)
 
     assert callback_calls == [("cn", ["CN:159659"])]
+    assert service.calls == []
+
+
+def test_scheduler_skips_before_market_close(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    settings = Settings(
+        schedule_enabled=True,
+        markets_enabled=["us"],
+        etf_list=["US:QQQ"],
+        schedule_cron_us="0 0 9 * * 1-5",
+    )
+    service = _SpyService()
+    scheduler = EtfScheduler(service=service, settings=settings)
+    now = datetime(2026, 3, 9, 9, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+    monkeypatch.setattr(
+        "daily_etf_analysis.scheduler.scheduler.is_market_open_today",
+        lambda _market: True,
+    )
+
+    scheduler._maybe_run("us", settings.schedule_cron_us, now)
+
     assert service.calls == []
 
 

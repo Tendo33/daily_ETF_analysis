@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 from daily_etf_analysis.cli.run_daily_analysis import (
     _exit_code_for_status,
+    _wait_tasks_completion,
     parse_cli_args,
     run_daily_analysis,
 )
@@ -46,7 +48,7 @@ class _FakeService:
         )
         self._task.symbols = list(symbols or [])
         self._task.force_refresh = bool(force_refresh)
-        self._task.status = TaskStatus.RUNNING
+        self._task.status = TaskStatus.PROCESSING
         return self._task
 
     def get_task(self, task_id: str):  # type: ignore[no-untyped-def]
@@ -129,6 +131,7 @@ def test_run_daily_analysis_market_filter_and_notify(tmp_path: Path) -> None:
     assert service.run_calls[0]["symbols"] == ["CN:159659"]
     assert service.run_calls[0]["skip_market_guard"] is False
     assert result["task_id"] == "task-123"
+    assert result["task_ids"] == ["task-123"]
     assert result["status"] == "completed"
     assert Path(str(result["report_path"])).exists()
     assert result["notification_sent"] is True
@@ -179,6 +182,7 @@ def test_run_daily_analysis_skips_when_filtered_symbols_empty(tmp_path: Path) ->
     )
 
     assert result["status"] == "skipped"
+    assert result["task_ids"] == []
     assert result["notification_sent"] is False
     assert result["notification_reason"] == "no_symbols_matched"
     assert result["task_id"] == "skipped"
@@ -192,3 +196,29 @@ def test_exit_code_for_status() -> None:
     assert _exit_code_for_status("completed") == 0
     assert _exit_code_for_status("skipped") == 0
     assert _exit_code_for_status("failed") == 1
+
+
+def test_wait_tasks_completion_respects_global_timeout() -> None:
+    class _NeverDoneService:
+        def get_task(self, task_id: str):  # type: ignore[no-untyped-def]
+            return AnalysisTask(
+                task_id=task_id,
+                status=TaskStatus.PENDING,
+                symbols=["CN:159659"],
+                force_refresh=False,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+    service = _NeverDoneService()
+    start = time.monotonic()
+    tasks = _wait_tasks_completion(
+        service=service,  # type: ignore[arg-type]
+        task_ids=["task-1", "task-2"],
+        timeout_seconds=1,
+        poll_interval_seconds=0.1,
+    )
+    elapsed = time.monotonic() - start
+
+    assert len(tasks) == 2
+    assert elapsed < 1.7

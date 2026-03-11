@@ -1,0 +1,81 @@
+{
+  "task_id": "23eaf24de1e04091ab42e9014e9ec435",
+  "task_ids": [
+    "23eaf24de1e04091ab42e9014e9ec435"
+  ],
+  "status": "completed",
+  "report_date": "2026-03-10",
+  "market": "all",
+  "symbols": [
+    "US:QQQ"
+  ],
+  "report_rows": [
+    {
+      "task_id": "23eaf24de1e04091ab42e9014e9ec435",
+      "symbol": "US:QQQ",
+      "trade_date": "2026-03-10",
+      "score": 50,
+      "trend": "neutral",
+      "action": "hold",
+      "confidence": "low",
+      "summary": "LLM analysis unavailable; using neutral fallback.",
+      "model_used": null,
+      "success": false,
+      "error_message": "LLM not configured",
+      "factors": {
+        "latest_price": 607.77001953125,
+        "latest_close": 607.77001953125,
+        "change_pct": 1.6469931328420472e-05,
+        "ma5": 606.9880004882813,
+        "ma10": 607.7820007324219,
+        "ma20": 606.6804931640625,
+        "ma20_slope": -0.0006860582547104274,
+        "return_20": -0.006050912308286296,
+        "return_60": -0.02721790019162169,
+        "volatility_annualized": 0.1723471065424078,
+        "max_drawdown_60": 0.057152242633890446,
+        "volume_ratio": 0.8836155359584615,
+        "trend_alignment": "non_bullish",
+        "data_points": 120,
+        "data_quality": "ok",
+        "turnover": null,
+        "realtime_change_pct": 0.0016469931328420473,
+        "news_provider": null,
+        "force_refresh": true
+      },
+      "key_points": [
+        "Neutral fallback used due to LLM failure."
+      ],
+      "risk_alerts": []
+    }
+  ],
+  "market_review": {
+    "total": 1,
+    "avg_score": 50.0,
+    "trend_counts": {
+      "neutral": 1
+    },
+    "action_counts": {
+      "hold": 1
+    },
+    "top": [
+      {
+        "symbol": "US:QQQ",
+        "score": 50,
+        "trend": "neutral",
+        "action": "hold"
+      }
+    ],
+    "bottom": [
+      {
+        "symbol": "US:QQQ",
+        "score": 50,
+        "trend": "neutral",
+        "action": "hold"
+      }
+    ],
+    "risk_alerts": [],
+    "industry": []
+  },
+  "history_by_symbol": {}
+}

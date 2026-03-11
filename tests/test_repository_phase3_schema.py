@@ -115,3 +115,19 @@ def test_phase3_report_context_and_news_roundtrip(tmp_path: Path) -> None:
     news = repo.get_history_news(rows[0]["id"])
     assert len(news) == 1
     assert news[0]["title"] == "sample news"
+
+
+def test_analysis_run_roundtrip(tmp_path: Path) -> None:
+    repo = _build_repo(tmp_path)
+    repo.create_analysis_run(
+        run_id="run-1",
+        symbols=["US:QQQ"],
+        source="test",
+        market="us",
+        run_window="us:2026-03-10",
+    )
+    run = repo.get_analysis_run("run-1")
+    assert run is not None
+    assert run.run_id == "run-1"
+    assert run.market == "us"
+    assert run.symbols == ["US:QQQ"]

@@ -13,8 +13,11 @@ from .log_config import (
     warning,
 )
 from .metrics import (
+    inc_analysis_run,
     inc_analysis_task,
     inc_api_request,
+    inc_decision_quality,
+    inc_llm_call,
     inc_md2img,
     inc_notification_delivery,
     inc_provider_call,
@@ -39,6 +42,9 @@ __all__ = [
     "render_metrics_text",
     "inc_api_request",
     "inc_analysis_task",
+    "inc_analysis_run",
+    "inc_llm_call",
+    "inc_decision_quality",
     "inc_provider_call",
     "inc_notification_delivery",
     "inc_scheduler_run",

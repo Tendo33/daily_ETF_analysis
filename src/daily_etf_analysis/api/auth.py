@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 from fastapi import Header, HTTPException
 
 from daily_etf_analysis.config.settings import get_settings
@@ -25,5 +27,5 @@ def require_admin_token(
         )
 
     token = authorization.split(" ", 1)[1].strip()
-    if token != expected:
+    if not secrets.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="Invalid admin token")

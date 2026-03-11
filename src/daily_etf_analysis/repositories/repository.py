@@ -10,6 +10,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -19,19 +20,24 @@ from sqlalchemy import (
     func,
     select,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
+    AnalysisRun,
     AnalysisTask,
     EtfAnalysisResult,
     EtfDailyBar,
     EtfInstrument,
     EtfRealtimeQuote,
     Market,
+    TaskErrorCode,
     TaskStatus,
+    parse_task_status,
 )
+from daily_etf_analysis.repositories.schema_guard import should_enforce_schema_guard
 
 
 class Base(DeclarativeBase):
@@ -81,6 +87,13 @@ class EtfDailyBarORM(Base):
 
 class EtfRealtimeQuoteORM(Base):
     __tablename__ = "etf_realtime_quotes"
+    __table_args__ = (
+        Index(
+            "ix_etf_realtime_quotes_symbol_quote_time",
+            "symbol",
+            "quote_time",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
@@ -100,15 +113,32 @@ class AnalysisTaskORM(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     symbols_json: Mapped[str] = mapped_column(Text, default="[]")
     force_refresh: Mapped[bool] = mapped_column(Boolean, default=False)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str] = mapped_column(
+        String(64), default=TaskErrorCode.NONE.value
+    )
+    skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skipped_symbols_json: Mapped[str] = mapped_column(Text, default="[]")
+    analyzed_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
 
 
 class EtfAnalysisReportORM(Base):
     __tablename__ = "etf_analysis_reports"
+    __table_args__ = (
+        Index(
+            "ix_etf_analysis_reports_symbol_trade_date_id",
+            "symbol",
+            "trade_date",
+            "id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -120,11 +150,49 @@ class EtfAnalysisReportORM(Base):
     model_used: Mapped[str | None] = mapped_column(String(128), nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    horizon: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="next_trading_day"
+    )
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    fallback_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     factors_json: Mapped[str] = mapped_column(Text, default="{}")
     key_points_json: Mapped[str] = mapped_column(Text, default="[]")
     risk_alerts_json: Mapped[str] = mapped_column(Text, default="[]")
     context_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     news_items_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class AnalysisRunORM(Base):
+    __tablename__ = "analysis_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    symbols_json: Mapped[str] = mapped_column(Text, default="[]")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    market: Mapped[str] = mapped_column(String(16), nullable=False, default="all")
+    run_window: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    total_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    completed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    failed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    cancelled_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    decision_quality_json: Mapped[str] = mapped_column(Text, default="{}")
+    failure_summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AnalysisRunAuditLogORM(Base):
+    __tablename__ = "analysis_run_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
 
 
@@ -197,6 +265,9 @@ class EtfRepository:
         self.init_db()
 
     def init_db(self) -> None:
+        # Runtime path is Alembic-first. Keep create_all only for isolated test DBs.
+        if should_enforce_schema_guard():
+            return
         Base.metadata.create_all(self.engine)
 
     @contextmanager
@@ -282,37 +353,36 @@ class EtfRepository:
         if not bars:
             return
         with self.session() as db:
-            for bar in bars:
-                existing = db.execute(
-                    select(EtfDailyBarORM).where(
-                        EtfDailyBarORM.symbol == bar.symbol,
-                        EtfDailyBarORM.trade_date == bar.trade_date,
-                    )
-                ).scalar_one_or_none()
-                if existing:
-                    existing.open = bar.open
-                    existing.high = bar.high
-                    existing.low = bar.low
-                    existing.close = bar.close
-                    existing.volume = bar.volume
-                    existing.amount = bar.amount
-                    existing.pct_chg = bar.pct_chg
-                    existing.source = bar.source
-                else:
-                    db.add(
-                        EtfDailyBarORM(
-                            symbol=bar.symbol,
-                            trade_date=bar.trade_date,
-                            open=bar.open,
-                            high=bar.high,
-                            low=bar.low,
-                            close=bar.close,
-                            volume=bar.volume,
-                            amount=bar.amount,
-                            pct_chg=bar.pct_chg,
-                            source=bar.source,
-                        )
-                    )
+            values = [
+                {
+                    "symbol": bar.symbol,
+                    "trade_date": bar.trade_date,
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume,
+                    "amount": bar.amount,
+                    "pct_chg": bar.pct_chg,
+                    "source": bar.source,
+                }
+                for bar in bars
+            ]
+            stmt = sqlite_insert(EtfDailyBarORM).values(values)
+            upsert = stmt.on_conflict_do_update(
+                index_elements=["symbol", "trade_date"],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                    "amount": stmt.excluded.amount,
+                    "pct_chg": stmt.excluded.pct_chg,
+                    "source": stmt.excluded.source,
+                },
+            )
+            db.execute(upsert)
 
     def get_recent_bars(self, symbol: str, days: int = 120) -> list[EtfDailyBar]:
         cutoff = date.today() - timedelta(days=days * 2)
@@ -393,14 +463,30 @@ class EtfRepository:
                     status=task.status.value,
                     symbols_json=json.dumps(task.symbols, ensure_ascii=False),
                     force_refresh=task.force_refresh,
+                    run_id=task.run_id,
                     error=task.error,
+                    error_code=task.error_code.value,
+                    skip_reason=task.skip_reason,
+                    skipped_symbols_json=json.dumps(
+                        task.skipped_symbols, ensure_ascii=False
+                    ),
+                    analyzed_count=task.analyzed_count,
+                    skipped_count=task.skipped_count,
                     created_at=task.created_at,
                     updated_at=task.updated_at,
                 )
             )
 
     def update_task(
-        self, task_id: str, status: TaskStatus, error: str | None = None
+        self,
+        task_id: str,
+        status: TaskStatus,
+        error: str | None = None,
+        error_code: TaskErrorCode = TaskErrorCode.NONE,
+        skip_reason: str | None = None,
+        skipped_symbols: list[str] | None = None,
+        analyzed_count: int | None = None,
+        skipped_count: int | None = None,
     ) -> None:
         with self.session() as db:
             row = db.execute(
@@ -408,6 +494,16 @@ class EtfRepository:
             ).scalar_one()
             row.status = status.value
             row.error = error
+            row.error_code = error_code.value
+            row.skip_reason = skip_reason
+            if skipped_symbols is not None:
+                row.skipped_symbols_json = json.dumps(
+                    skipped_symbols, ensure_ascii=False
+                )
+            if analyzed_count is not None:
+                row.analyzed_count = analyzed_count
+            if skipped_count is not None:
+                row.skipped_count = skipped_count
             row.updated_at = utc_now_naive()
 
     def get_task(self, task_id: str) -> AnalysisTask | None:
@@ -419,12 +515,18 @@ class EtfRepository:
                 return None
             return AnalysisTask(
                 task_id=row.task_id,
-                status=TaskStatus(row.status),
+                status=parse_task_status(row.status),
                 symbols=json.loads(row.symbols_json),
                 force_refresh=row.force_refresh,
+                run_id=row.run_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
                 error=row.error,
+                error_code=_parse_task_error_code(row.error_code),
+                skip_reason=row.skip_reason,
+                skipped_symbols=json.loads(row.skipped_symbols_json or "[]"),
+                analyzed_count=row.analyzed_count,
+                skipped_count=row.skipped_count,
             )
 
     def list_tasks(self, limit: int = 50) -> list[AnalysisTask]:
@@ -441,13 +543,214 @@ class EtfRepository:
             return [
                 AnalysisTask(
                     task_id=row.task_id,
-                    status=TaskStatus(row.status),
+                    status=parse_task_status(row.status),
                     symbols=json.loads(row.symbols_json),
                     force_refresh=row.force_refresh,
+                    run_id=row.run_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
                     error=row.error,
+                    error_code=_parse_task_error_code(row.error_code),
+                    skip_reason=row.skip_reason,
+                    skipped_symbols=json.loads(row.skipped_symbols_json or "[]"),
+                    analyzed_count=row.analyzed_count,
+                    skipped_count=row.skipped_count,
                 )
+                for row in rows
+            ]
+
+    def create_analysis_run(
+        self,
+        *,
+        run_id: str,
+        symbols: list[str],
+        source: str,
+        market: str,
+        run_window: str | None,
+    ) -> None:
+        with self.session() as db:
+            db.add(
+                AnalysisRunORM(
+                    run_id=run_id,
+                    status=TaskStatus.PENDING.value,
+                    symbols_json=json.dumps(symbols, ensure_ascii=False),
+                    source=source,
+                    market=market,
+                    run_window=run_window,
+                    total_tasks=len(symbols),
+                    completed_tasks=0,
+                    failed_tasks=0,
+                    cancelled_tasks=0,
+                    decision_quality_json="{}",
+                    failure_summary_json="{}",
+                    created_at=utc_now_naive(),
+                    updated_at=utc_now_naive(),
+                )
+            )
+
+    def set_analysis_run_status(self, run_id: str, status: TaskStatus) -> None:
+        with self.session() as db:
+            row = db.execute(
+                select(AnalysisRunORM).where(AnalysisRunORM.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.status = status.value
+            row.updated_at = utc_now_naive()
+            if status in {
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }:
+                row.completed_at = utc_now_naive()
+
+    def update_analysis_run_quality(
+        self,
+        run_id: str,
+        *,
+        decision_quality: dict[str, Any],
+        failure_summary: dict[str, Any],
+    ) -> None:
+        with self.session() as db:
+            row = db.execute(
+                select(AnalysisRunORM).where(AnalysisRunORM.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.decision_quality_json = json.dumps(decision_quality, ensure_ascii=False)
+            row.failure_summary_json = json.dumps(failure_summary, ensure_ascii=False)
+            row.updated_at = utc_now_naive()
+
+    def refresh_analysis_run_from_tasks(self, run_id: str) -> None:
+        with self.session() as db:
+            run = db.execute(
+                select(AnalysisRunORM).where(AnalysisRunORM.run_id == run_id)
+            ).scalar_one_or_none()
+            if run is None:
+                return
+            rows = (
+                db.execute(
+                    select(AnalysisTaskORM).where(AnalysisTaskORM.run_id == run_id)
+                )
+                .scalars()
+                .all()
+            )
+            total = len(rows)
+            completed = sum(
+                1 for item in rows if item.status == TaskStatus.COMPLETED.value
+            )
+            failed = sum(1 for item in rows if item.status == TaskStatus.FAILED.value)
+            cancelled = sum(
+                1 for item in rows if item.status == TaskStatus.CANCELLED.value
+            )
+            run.total_tasks = total
+            run.completed_tasks = completed
+            run.failed_tasks = failed
+            run.cancelled_tasks = cancelled
+            if total == 0:
+                run.status = TaskStatus.PENDING.value
+            elif completed + failed + cancelled == total:
+                if failed > 0:
+                    run.status = TaskStatus.FAILED.value
+                elif cancelled > 0 and completed == 0:
+                    run.status = TaskStatus.CANCELLED.value
+                else:
+                    run.status = TaskStatus.COMPLETED.value
+                run.completed_at = utc_now_naive()
+            else:
+                run.status = TaskStatus.PROCESSING.value
+            run.updated_at = utc_now_naive()
+
+    def get_analysis_run(self, run_id: str) -> AnalysisRun | None:
+        with self.session() as db:
+            row = db.execute(
+                select(AnalysisRunORM).where(AnalysisRunORM.run_id == run_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return AnalysisRun(
+                run_id=row.run_id,
+                status=parse_task_status(row.status),
+                symbols=json.loads(row.symbols_json or "[]"),
+                source=row.source,
+                market=row.market,
+                run_window=row.run_window,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                completed_at=row.completed_at,
+                total_tasks=row.total_tasks,
+                completed_tasks=row.completed_tasks,
+                failed_tasks=row.failed_tasks,
+                cancelled_tasks=row.cancelled_tasks,
+                decision_quality=json.loads(row.decision_quality_json or "{}"),
+                failure_summary=json.loads(row.failure_summary_json or "{}"),
+            )
+
+    def list_tasks_by_run(self, run_id: str) -> list[AnalysisTask]:
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(AnalysisTaskORM)
+                    .where(AnalysisTaskORM.run_id == run_id)
+                    .order_by(desc(AnalysisTaskORM.created_at))
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                AnalysisTask(
+                    task_id=row.task_id,
+                    status=parse_task_status(row.status),
+                    symbols=json.loads(row.symbols_json or "[]"),
+                    force_refresh=row.force_refresh,
+                    run_id=row.run_id,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                    error=row.error,
+                    error_code=_parse_task_error_code(row.error_code),
+                    skip_reason=row.skip_reason,
+                    skipped_symbols=json.loads(row.skipped_symbols_json or "[]"),
+                    analyzed_count=row.analyzed_count,
+                    skipped_count=row.skipped_count,
+                )
+                for row in rows
+            ]
+
+    def create_analysis_run_audit_log(
+        self, *, run_id: str, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        with self.session() as db:
+            db.add(
+                AnalysisRunAuditLogORM(
+                    run_id=run_id,
+                    event_type=event_type,
+                    payload_json=json.dumps(payload, ensure_ascii=False),
+                    created_at=utc_now_naive(),
+                )
+            )
+
+    def list_analysis_run_audit_logs(
+        self, run_id: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        with self.session() as db:
+            rows = (
+                db.execute(
+                    select(AnalysisRunAuditLogORM)
+                    .where(AnalysisRunAuditLogORM.run_id == run_id)
+                    .order_by(desc(AnalysisRunAuditLogORM.id))
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "run_id": row.run_id,
+                    "event_type": row.event_type,
+                    "payload": json.loads(row.payload_json or "{}"),
+                    "created_at": row.created_at.isoformat(),
+                }
                 for row in rows
             ]
 
@@ -458,12 +761,14 @@ class EtfRepository:
         trade_date: date,
         factors: dict[str, Any],
         result: EtfAnalysisResult,
+        run_id: str | None = None,
         context_snapshot: dict[str, Any] | None = None,
         news_items: list[dict[str, Any]] | None = None,
     ) -> None:
         with self.session() as db:
             db.add(
                 EtfAnalysisReportORM(
+                    run_id=run_id,
                     task_id=task_id,
                     symbol=symbol,
                     trade_date=trade_date,
@@ -475,6 +780,10 @@ class EtfRepository:
                     model_used=result.model_used,
                     success=result.success,
                     error_message=result.error_message,
+                    horizon=result.horizon,
+                    rationale=result.rationale,
+                    degraded=result.degraded,
+                    fallback_reason=result.fallback_reason,
                     factors_json=json.dumps(factors, ensure_ascii=False),
                     key_points_json=json.dumps(result.key_points, ensure_ascii=False),
                     risk_alerts_json=json.dumps(result.risk_alerts, ensure_ascii=False),
@@ -515,6 +824,7 @@ class EtfRepository:
             items = [
                 {
                     "id": row.id,
+                    "run_id": row.run_id,
                     "task_id": row.task_id,
                     "symbol": row.symbol,
                     "trade_date": row.trade_date.isoformat(),
@@ -523,6 +833,8 @@ class EtfRepository:
                     "confidence": row.confidence,
                     "summary": row.summary,
                     "success": row.success,
+                    "degraded": row.degraded,
+                    "fallback_reason": row.fallback_reason,
                     "created_at": row.created_at.isoformat(),
                 }
                 for row in rows
@@ -538,6 +850,7 @@ class EtfRepository:
                 return None
             return {
                 "id": row.id,
+                "run_id": row.run_id,
                 "task_id": row.task_id,
                 "symbol": row.symbol,
                 "trade_date": row.trade_date.isoformat(),
@@ -546,8 +859,12 @@ class EtfRepository:
                 "action": row.action,
                 "confidence": row.confidence,
                 "summary": row.summary,
+                "horizon": row.horizon,
+                "rationale": row.rationale,
                 "model_used": row.model_used,
                 "success": row.success,
+                "degraded": row.degraded,
+                "fallback_reason": row.fallback_reason,
                 "error_message": row.error_message,
                 "factors": json.loads(row.factors_json),
                 "key_points": json.loads(row.key_points_json),
@@ -883,16 +1200,19 @@ class EtfRepository:
             query = select(EtfAnalysisReportORM).where(
                 EtfAnalysisReportORM.trade_date == report_date
             )
+            if market:
+                query = query.where(
+                    EtfAnalysisReportORM.symbol.like(f"{market.upper()}:%")
+                )
             rows = (
                 db.execute(query.order_by(EtfAnalysisReportORM.symbol)).scalars().all()
             )
             result = []
             for row in rows:
-                if market and not row.symbol.startswith(market.upper() + ":"):
-                    continue
                 result.append(
                     {
                         "task_id": row.task_id,
+                        "run_id": row.run_id,
                         "symbol": row.symbol,
                         "trade_date": row.trade_date.isoformat(),
                         "score": row.score,
@@ -900,8 +1220,12 @@ class EtfRepository:
                         "action": row.action,
                         "confidence": row.confidence,
                         "summary": row.summary,
+                        "horizon": row.horizon,
+                        "rationale": row.rationale,
                         "model_used": row.model_used,
                         "success": row.success,
+                        "degraded": row.degraded,
+                        "fallback_reason": row.fallback_reason,
                         "error_message": row.error_message,
                         "factors": json.loads(row.factors_json),
                         "key_points": json.loads(row.key_points_json),
@@ -917,35 +1241,151 @@ class EtfRepository:
             return {}
         normalized_symbols = [s.upper() for s in symbols]
         with self.session() as db:
+            try:
+                ranked = (
+                    select(
+                        EtfAnalysisReportORM.symbol.label("symbol"),
+                        EtfAnalysisReportORM.trade_date.label("trade_date"),
+                        EtfAnalysisReportORM.action.label("action"),
+                        EtfAnalysisReportORM.trend.label("trend"),
+                        EtfAnalysisReportORM.score.label("score"),
+                        func.row_number()
+                        .over(
+                            partition_by=EtfAnalysisReportORM.symbol,
+                            order_by=(
+                                desc(EtfAnalysisReportORM.trade_date),
+                                desc(EtfAnalysisReportORM.id),
+                            ),
+                        )
+                        .label("row_num"),
+                    )
+                    .where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
+                    .subquery()
+                )
+                rows = db.execute(
+                    select(ranked)
+                    .where(ranked.c.row_num <= limit)
+                    .order_by(
+                        ranked.c.symbol,
+                        ranked.c.row_num,
+                    )
+                ).all()
+                results: dict[str, list[dict[str, Any]]] = {}
+                for row in rows:
+                    bucket = results.setdefault(str(row.symbol), [])
+                    trade_date = row.trade_date
+                    bucket.append(
+                        {
+                            "trade_date": (
+                                trade_date.isoformat()
+                                if isinstance(trade_date, date)
+                                else str(trade_date)
+                            ),
+                            "action": str(row.action),
+                            "trend": str(row.trend),
+                            "score": int(row.score),
+                        }
+                    )
+                return results
+            except Exception:
+                rows = (
+                    db.execute(
+                        select(EtfAnalysisReportORM)
+                        .where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
+                        .order_by(
+                            EtfAnalysisReportORM.symbol,
+                            desc(EtfAnalysisReportORM.trade_date),
+                            desc(EtfAnalysisReportORM.id),
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                fallback_results: dict[str, list[dict[str, Any]]] = {
+                    s: [] for s in normalized_symbols
+                }
+                for row in rows:
+                    bucket = fallback_results.setdefault(row.symbol, [])
+                    if len(bucket) >= limit:
+                        continue
+                    bucket.append(
+                        {
+                            "trade_date": row.trade_date.isoformat(),
+                            "action": row.action,
+                            "trend": row.trend,
+                            "score": row.score,
+                        }
+                    )
+                return {k: v for k, v in fallback_results.items() if v}
+
+    def list_signals_v2(
+        self,
+        *,
+        symbol: str | None = None,
+        run_id: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        with self.session() as db:
+            query = select(EtfAnalysisReportORM)
+            if symbol:
+                query = query.where(EtfAnalysisReportORM.symbol == symbol.upper())
+            if run_id:
+                query = query.where(EtfAnalysisReportORM.run_id == run_id)
+            if date_from:
+                query = query.where(EtfAnalysisReportORM.trade_date >= date_from)
+            if date_to:
+                query = query.where(EtfAnalysisReportORM.trade_date <= date_to)
             rows = (
                 db.execute(
-                    select(EtfAnalysisReportORM)
-                    .where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
-                    .order_by(
-                        EtfAnalysisReportORM.symbol,
+                    query.order_by(
                         desc(EtfAnalysisReportORM.trade_date),
                         desc(EtfAnalysisReportORM.id),
-                    )
+                    ).limit(limit)
                 )
                 .scalars()
                 .all()
             )
-            results: dict[str, list[dict[str, Any]]] = {
-                s: [] for s in normalized_symbols
-            }
-            for row in rows:
-                bucket = results.setdefault(row.symbol, [])
-                if len(bucket) >= limit:
-                    continue
-                bucket.append(
-                    {
-                        "trade_date": row.trade_date.isoformat(),
-                        "action": row.action,
-                        "trend": row.trend,
-                        "score": row.score,
-                    }
-                )
-            return {k: v for k, v in results.items() if v}
+            return [
+                {
+                    "run_id": row.run_id,
+                    "task_id": row.task_id,
+                    "symbol": row.symbol,
+                    "trade_date": row.trade_date.isoformat(),
+                    "score": row.score,
+                    "trend": row.trend,
+                    "action": row.action,
+                    "confidence": row.confidence,
+                    "horizon": row.horizon,
+                    "rationale": row.rationale,
+                    "risk_alerts": json.loads(row.risk_alerts_json),
+                    "summary": row.summary,
+                    "degraded": row.degraded,
+                    "fallback_reason": row.fallback_reason,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+
+    def list_failures_by_run(self, run_id: str) -> list[dict[str, Any]]:
+        tasks = self.list_tasks_by_run(run_id)
+        rows: list[dict[str, Any]] = []
+        for task in tasks:
+            if task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+                continue
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "task_id": task.task_id,
+                    "symbols": task.symbols,
+                    "error_code": task.error_code.value,
+                    "error_message": task.error,
+                    "skip_reason": task.skip_reason,
+                    "updated_at": task.updated_at.isoformat(),
+                }
+            )
+        return rows
 
     def get_latest_report_trade_date_for_task(self, task_id: str) -> date | None:
         with self.session() as db:
@@ -967,21 +1407,64 @@ class EtfRepository:
             return {}
         normalized_symbols = [s.upper() for s in symbols]
         with self.session() as db:
-            query = select(EtfAnalysisReportORM).where(
+            base_query = select(EtfAnalysisReportORM).where(
                 EtfAnalysisReportORM.symbol.in_(normalized_symbols)
             )
             if report_date is not None:
-                query = query.where(EtfAnalysisReportORM.trade_date == report_date)
-            rows = (
-                db.execute(
-                    query.order_by(
-                        EtfAnalysisReportORM.symbol,
-                        desc(EtfAnalysisReportORM.trade_date),
-                    )
+                base_query = base_query.where(
+                    EtfAnalysisReportORM.trade_date == report_date
                 )
-                .scalars()
-                .all()
-            )
+            try:
+                ranked = select(
+                    EtfAnalysisReportORM.id.label("id"),
+                    EtfAnalysisReportORM.symbol.label("symbol"),
+                    func.row_number()
+                    .over(
+                        partition_by=EtfAnalysisReportORM.symbol,
+                        order_by=(
+                            desc(EtfAnalysisReportORM.trade_date),
+                            desc(EtfAnalysisReportORM.id),
+                        ),
+                    )
+                    .label("row_num"),
+                ).where(EtfAnalysisReportORM.symbol.in_(normalized_symbols))
+                if report_date is not None:
+                    ranked = ranked.where(
+                        EtfAnalysisReportORM.trade_date == report_date
+                    )
+                ranked_subquery = ranked.subquery()
+                latest_ids = (
+                    db.execute(
+                        select(ranked_subquery.c.id).where(
+                            ranked_subquery.c.row_num == 1
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if not latest_ids:
+                    return {}
+                rows = (
+                    db.execute(
+                        select(EtfAnalysisReportORM).where(
+                            EtfAnalysisReportORM.id.in_(latest_ids)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            except Exception:
+                rows = (
+                    db.execute(
+                        base_query.order_by(
+                            EtfAnalysisReportORM.symbol,
+                            desc(EtfAnalysisReportORM.trade_date),
+                            desc(EtfAnalysisReportORM.id),
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
             latest: dict[str, dict[str, Any]] = {}
             for row in rows:
                 if row.symbol in latest:
@@ -994,8 +1477,12 @@ class EtfRepository:
                     "action": row.action,
                     "confidence": row.confidence,
                     "summary": row.summary,
+                    "horizon": row.horizon,
+                    "rationale": row.rationale,
                     "model_used": row.model_used,
                     "success": row.success,
+                    "degraded": row.degraded,
+                    "fallback_reason": row.fallback_reason,
                     "error_message": row.error_message,
                     "factors": json.loads(row.factors_json),
                     "key_points": json.loads(row.key_points_json),
@@ -1010,17 +1497,54 @@ class EtfRepository:
             return {}
         normalized_symbols = [s.upper() for s in symbols]
         with self.session() as db:
-            rows = (
-                db.execute(
-                    select(EtfRealtimeQuoteORM)
-                    .where(EtfRealtimeQuoteORM.symbol.in_(normalized_symbols))
-                    .order_by(
-                        EtfRealtimeQuoteORM.symbol, desc(EtfRealtimeQuoteORM.quote_time)
+            try:
+                ranked = (
+                    select(
+                        EtfRealtimeQuoteORM.id.label("id"),
+                        EtfRealtimeQuoteORM.symbol.label("symbol"),
+                        func.row_number()
+                        .over(
+                            partition_by=EtfRealtimeQuoteORM.symbol,
+                            order_by=(
+                                desc(EtfRealtimeQuoteORM.quote_time),
+                                desc(EtfRealtimeQuoteORM.id),
+                            ),
+                        )
+                        .label("row_num"),
                     )
+                    .where(EtfRealtimeQuoteORM.symbol.in_(normalized_symbols))
+                    .subquery()
                 )
-                .scalars()
-                .all()
-            )
+                latest_ids = (
+                    db.execute(select(ranked.c.id).where(ranked.c.row_num == 1))
+                    .scalars()
+                    .all()
+                )
+                if not latest_ids:
+                    return {}
+                rows = (
+                    db.execute(
+                        select(EtfRealtimeQuoteORM).where(
+                            EtfRealtimeQuoteORM.id.in_(latest_ids)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            except Exception:
+                rows = (
+                    db.execute(
+                        select(EtfRealtimeQuoteORM)
+                        .where(EtfRealtimeQuoteORM.symbol.in_(normalized_symbols))
+                        .order_by(
+                            EtfRealtimeQuoteORM.symbol,
+                            desc(EtfRealtimeQuoteORM.quote_time),
+                            desc(EtfRealtimeQuoteORM.id),
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
             latest: dict[str, EtfRealtimeQuote] = {}
             for row in rows:
                 if row.symbol in latest:
@@ -1118,3 +1642,12 @@ def _float_or_none(value: object) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def _parse_task_error_code(value: str | None) -> TaskErrorCode:
+    if not value:
+        return TaskErrorCode.NONE
+    try:
+        return TaskErrorCode(value)
+    except ValueError:
+        return TaskErrorCode.UNKNOWN

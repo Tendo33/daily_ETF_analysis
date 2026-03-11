@@ -35,6 +35,29 @@ class _DisabledNotifier:
         return NotificationResult(sent=False, reason="disabled")
 
 
+class _ExceptionNotifier:
+    channel = "mock_exception"
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def send_markdown(self, title: str, markdown: str) -> NotificationResult:
+        raise RuntimeError("token=abc123 webhook=https://example.com/hook error")
+
+
+class _SensitiveReasonNotifier:
+    channel = "mock_sensitive_reason"
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def send_markdown(self, title: str, markdown: str) -> NotificationResult:
+        return NotificationResult(
+            sent=False,
+            reason="delivery failed webhook=https://example.com/hook token=abc123",
+        )
+
+
 def test_notification_manager_aggregates_multi_channel_results() -> None:
     settings = Settings(notify_channels=["mock_success", "mock_fail"])
     manager = NotificationManager(
@@ -83,3 +106,34 @@ def test_notification_manager_empty_channels_are_disabled() -> None:
     assert result.sent is False
     assert result.reason == "disabled"
     assert result.channel_results == {}
+
+
+def test_notification_manager_masks_sensitive_failure_reason() -> None:
+    settings = Settings(notify_channels=["mock_exception"])
+    manager = NotificationManager(
+        settings=settings,
+        notifiers={"mock_exception": _ExceptionNotifier()},
+    )
+
+    result = manager.send_markdown("daily", "body")
+    assert result.sent is False
+    reason = result.channel_results["mock_exception"].reason
+    assert reason is not None
+    assert "token=" not in reason.lower()
+    assert "http" not in reason.lower()
+    assert "***" in reason
+
+
+def test_notification_manager_sanitizes_sensitive_reason_from_channel_result() -> None:
+    settings = Settings(notify_channels=["mock_sensitive_reason"])
+    manager = NotificationManager(
+        settings=settings,
+        notifiers={"mock_sensitive_reason": _SensitiveReasonNotifier()},
+    )
+
+    result = manager.send_markdown("daily", "body")
+    assert result.sent is False
+    reason = result.channel_results["mock_sensitive_reason"].reason
+    assert "token=" not in reason.lower()
+    assert "http" not in reason.lower()
+    assert "***" in reason

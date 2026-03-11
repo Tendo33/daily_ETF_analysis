@@ -110,6 +110,7 @@ def run_daily_analysis(
         )
         return {
             "task_id": SKIPPED_STATUS,
+            "task_ids": [],
             "status": SKIPPED_STATUS,
             "report_path": str(report_path),
             "markdown_report_path": str(markdown_path),
@@ -118,20 +119,60 @@ def run_daily_analysis(
             "notification_channels": {},
         }
 
-    task = service.run_analysis(
-        symbols=selected_symbols,
-        force_refresh=force_run,
-        skip_market_guard=force_run,
-    )
-    final_task = _wait_task_completion(
+    run_id: str | None = None
+    task_ids: list[str] = []
+    if hasattr(service, "create_analysis_run") and hasattr(service, "repository"):
+        try:
+            run_window = _build_run_window(market=report_market)
+            run = service.create_analysis_run(  # type: ignore[attr-defined]
+                symbols=selected_symbols,
+                markets=None if market is None else [market],
+                force_refresh=force_run,
+                force_retry=False,
+                source="cli",
+                run_window=run_window,
+            )
+            run_id = str(run.run_id)
+            task_ids = _wait_for_run_task_ids(
+                service=service,
+                run_id=run_id,
+                timeout_seconds=wait_timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+        except Exception:
+            tasks = _submit_tasks(
+                service=service,
+                symbols=selected_symbols,
+                force_run=force_run,
+            )
+            task_ids = [task.task_id for task in tasks]
+    else:
+        tasks = _submit_tasks(
+            service=service,
+            symbols=selected_symbols,
+            force_run=force_run,
+        )
+        task_ids = [task.task_id for task in tasks]
+
+    if not task_ids:
+        tasks = _submit_tasks(
+            service=service,
+            symbols=selected_symbols,
+            force_run=force_run,
+        )
+        task_ids = [task.task_id for task in tasks]
+
+    final_tasks = _wait_tasks_completion(
         service=service,
-        task_id=task.task_id,
+        task_ids=task_ids,
         timeout_seconds=wait_timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,
     )
-    task_status = final_task.status.value
+    task_status = _aggregate_task_status(final_tasks)
 
-    report_date = service.get_task_report_date(task.task_id) or date.today()
+    report_date = (
+        _resolve_report_date(service=service, task_ids=task_ids) or date.today()
+    )
     report_rows = service.get_daily_report(report_date, market=report_market)
     history_by_symbol: dict[str, list[dict[str, Any]]] = {}
     if service.settings.report_history_compare_n > 0:
@@ -147,12 +188,64 @@ def run_daily_analysis(
         risk_top_n=service.settings.industry_risk_top_n,
         recommend_weights=service.settings.industry_recommend_weights,
     )
+    symbol_results = [
+        {
+            "run_id": row.get("run_id"),
+            "task_id": row.get("task_id"),
+            "symbol": row.get("symbol"),
+            "trade_date": row.get("trade_date"),
+            "score": row.get("score"),
+            "trend": row.get("trend"),
+            "action": row.get("action"),
+            "confidence": row.get("confidence"),
+            "horizon": row.get("horizon") or "next_trading_day",
+            "risk_alerts": row.get("risk_alerts", []),
+            "rationale": row.get("rationale") or row.get("summary", ""),
+            "degraded": bool(row.get("degraded", False)),
+            "fallback_reason": row.get("fallback_reason"),
+        }
+        for row in report_rows
+    ]
+    failures = [
+        {
+            "task_id": task.task_id,
+            "run_id": task.run_id,
+            "symbols": task.symbols,
+            "error_code": task.error_code.value,
+            "error_message": task.error,
+            "skip_reason": task.skip_reason,
+        }
+        for task in final_tasks
+        if task.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
+    ]
+    degraded_count = sum(1 for row in symbol_results if row["degraded"])
+    decision_quality = {
+        "total": len(symbol_results),
+        "degraded_count": degraded_count,
+        "fallback_count": degraded_count,
+        "success_rate": (
+            (len(symbol_results) - degraded_count) / len(symbol_results)
+            if symbol_results
+            else 0.0
+        ),
+    }
+    run_summary = {
+        "run_id": run_id,
+        "task_ids": task_ids,
+        "status": task_status,
+        "report_date": report_date.isoformat(),
+        "market": report_market,
+        "total_symbols": len(selected_symbols),
+    }
+
     report_path = _write_json_report(
         output_dir=output_dir,
         report_date=report_date,
-        task_id=task.task_id,
+        task_id=task_ids[0],
         payload={
-            "task_id": task.task_id,
+            "task_id": task_ids[0],
+            "run_id": run_id,
+            "task_ids": task_ids,
             "status": task_status,
             "report_date": report_date.isoformat(),
             "market": report_market,
@@ -160,10 +253,14 @@ def run_daily_analysis(
             "report_rows": report_rows,
             "market_review": market_review,
             "history_by_symbol": history_by_symbol,
+            "run_summary": run_summary,
+            "symbol_results": symbol_results,
+            "decision_quality": decision_quality,
+            "failures": failures,
         },
     )
     markdown = _build_markdown_summary(
-        task_id=task.task_id,
+        task_id=task_ids[0],
         status=task_status,
         report_date=report_date,
         market=report_market,
@@ -174,7 +271,7 @@ def run_daily_analysis(
     markdown_path = _write_markdown_report(
         output_dir=output_dir,
         report_date=report_date,
-        task_id=task.task_id,
+        task_id=task_ids[0],
         markdown=markdown,
     )
 
@@ -182,7 +279,11 @@ def run_daily_analysis(
     notification_reason = "skipped" if skip_notify else "disabled"
     notification_channels: dict[str, dict[str, object]] = {}
     if not skip_notify:
-        notify = notifier.send_markdown(title="daily_ETF_analysis", markdown=markdown)
+        severity = _notification_severity(task_status=task_status, failures=failures)
+        notify = notifier.send_markdown(
+            title=f"[{severity}] daily_ETF_analysis",
+            markdown=markdown,
+        )
         notification_sent = notify.sent
         notification_reason = notify.reason
         channels = getattr(notify, "channel_results", None)
@@ -196,10 +297,16 @@ def run_daily_analysis(
                 }
 
     return {
-        "task_id": task.task_id,
+        "task_id": task_ids[0],
+        "run_id": run_id,
+        "task_ids": task_ids,
         "status": task_status,
         "report_path": str(report_path),
         "markdown_report_path": str(markdown_path),
+        "run_summary": run_summary,
+        "symbol_results": symbol_results,
+        "decision_quality": decision_quality,
+        "failures": failures,
         "notification_sent": notification_sent,
         "notification_reason": notification_reason,
         "notification_channels": notification_channels,
@@ -258,14 +365,23 @@ def _wait_task_completion(
     task_id: str,
     timeout_seconds: int,
     poll_interval_seconds: float,
+    deadline_monotonic: float | None = None,
 ) -> AnalysisTask:
-    deadline = time.monotonic() + max(1, timeout_seconds)
+    deadline = (
+        deadline_monotonic
+        if deadline_monotonic is not None
+        else time.monotonic() + max(1, timeout_seconds)
+    )
     fallback = service.get_task(task_id)
     while time.monotonic() <= deadline:
         task = service.get_task(task_id)
         if task is not None:
             fallback = task
-            if task.status in {TaskStatus.COMPLETED, TaskStatus.FAILED}:
+            if task.status in {
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            }:
                 return task
         if poll_interval_seconds > 0:
             time.sleep(poll_interval_seconds)
@@ -278,6 +394,95 @@ def _wait_task_completion(
             error="Task lookup timeout",
         )
     return fallback
+
+
+def _submit_tasks(
+    *,
+    service: AnalysisService,
+    symbols: list[str],
+    force_run: bool,
+) -> list[AnalysisTask]:
+    if hasattr(service, "run_analysis_batch"):
+        tasks = service.run_analysis_batch(  # type: ignore[attr-defined]
+            symbols=symbols,
+            force_refresh=force_run,
+            skip_market_guard=force_run,
+        )
+        if tasks:
+            return tasks
+    task = service.run_analysis(
+        symbols=symbols,
+        force_refresh=force_run,
+        skip_market_guard=force_run,
+    )
+    return [task]
+
+
+def _wait_tasks_completion(
+    *,
+    service: AnalysisService,
+    task_ids: list[str],
+    timeout_seconds: int,
+    poll_interval_seconds: float,
+) -> list[AnalysisTask]:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    return [
+        _wait_task_completion(
+            service=service,
+            task_id=task_id,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            deadline_monotonic=deadline,
+        )
+        for task_id in task_ids
+    ]
+
+
+def _wait_for_run_task_ids(
+    *,
+    service: AnalysisService,
+    run_id: str,
+    timeout_seconds: int,
+    poll_interval_seconds: float,
+) -> list[str]:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    while time.monotonic() <= deadline:
+        tasks = []
+        if hasattr(service, "repository"):
+            tasks = service.repository.list_tasks_by_run(run_id)  # type: ignore[attr-defined]
+        if tasks:
+            return [task.task_id for task in tasks]
+        if poll_interval_seconds > 0:
+            time.sleep(poll_interval_seconds)
+    return []
+
+
+def _aggregate_task_status(tasks: list[AnalysisTask]) -> str:
+    for task in tasks:
+        if task.status == TaskStatus.FAILED:
+            return TaskStatus.FAILED.value
+    has_cancelled = any(task.status == TaskStatus.CANCELLED for task in tasks)
+    for task in tasks:
+        if task.status not in {
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }:
+            return TaskStatus.FAILED.value
+    if has_cancelled:
+        return TaskStatus.CANCELLED.value
+    return TaskStatus.COMPLETED.value
+
+
+def _resolve_report_date(service: AnalysisService, task_ids: list[str]) -> date | None:
+    latest: date | None = None
+    for task_id in task_ids:
+        value = service.get_task_report_date(task_id)
+        if value is None:
+            continue
+        if latest is None or value > latest:
+            latest = value
+    return latest
 
 
 def _write_json_report(
@@ -333,6 +538,22 @@ def _write_markdown_report(
     legacy_path = output_dir / f"report_{report_date.strftime('%Y%m%d')}.md"
     legacy_path.write_text(markdown, encoding="utf-8")
     return report_path
+
+
+def _notification_severity(*, task_status: str, failures: list[dict[str, Any]]) -> str:
+    if task_status == TaskStatus.COMPLETED.value and not failures:
+        return "OK"
+    if failures and task_status in {
+        TaskStatus.COMPLETED.value,
+        TaskStatus.CANCELLED.value,
+    }:
+        return "WARN"
+    return "ALERT"
+
+
+def _build_run_window(*, market: str) -> str:
+    today = date.today().isoformat()
+    return f"{market}:{today}"
 
 
 if __name__ == "__main__":

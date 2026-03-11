@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
 import markdown2
+
+_UNSAFE_URL_PATTERN = re.compile(r"(?i)(file://|javascript:|data:)")
 
 
 def markdown_to_png(
@@ -23,13 +26,23 @@ def markdown_to_png(
     except Exception:
         return None
 
-    html = markdown2.markdown(markdown)
+    safe_markdown = _UNSAFE_URL_PATTERN.sub("#", markdown)
+    html = markdown2.markdown(safe_markdown, safe_mode="escape")
     full_html = _wrap_html(html)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = Path(tmpdir) / "report.png"
         try:
-            imgkit.from_string(full_html, str(output_path))
+            imgkit.from_string(
+                full_html,
+                str(output_path),
+                options={
+                    "disable-local-file-access": "",
+                    "disable-javascript": "",
+                    "load-error-handling": "ignore",
+                    "load-media-error-handling": "ignore",
+                },
+            )
         except Exception:
             return None
         if not output_path.exists():

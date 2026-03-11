@@ -47,4 +47,4 @@ def test_feishu_notifier_handles_post_error(monkeypatch) -> None:  # type: ignor
     result = notifier.send_markdown(title="Daily ETF", markdown="summary")
 
     assert result.sent is False
-    assert "network down" in result.reason
+    assert result.reason == "delivery_failed"

@@ -76,6 +76,7 @@ def test_daily_runner_outputs_markdown_and_channel_result(tmp_path: Path) -> Non
 
     assert result["notification_sent"] is True
     assert result["notification_reason"] == "ok"
+    assert result["task_ids"] == ["task-xyz"]
     assert "notification_channels" in result
     markdown_path = Path(str(result["markdown_report_path"]))
     assert markdown_path.exists()

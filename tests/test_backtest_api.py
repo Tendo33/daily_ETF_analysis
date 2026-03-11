@@ -87,6 +87,10 @@ class _InvalidSymbolBacktestService(_FakeBacktestService):
 
 def test_backtest_api(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
+    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+    settings_module.reload_settings()
     monkeypatch.setattr(router_module, "_service", lambda: _FakeBacktestService())
 
     client = TestClient(app)
@@ -122,6 +126,10 @@ def test_backtest_api(monkeypatch) -> None:  # type: ignore[no-untyped-def]
 
 def test_backtest_symbol_invalid_symbol_returns_422(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    settings_module = importlib.import_module("daily_etf_analysis.config.settings")
+    monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
+    settings_module.reload_settings()
     monkeypatch.setattr(
         router_module,
         "_service",

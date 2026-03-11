@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import litellm
@@ -22,6 +23,7 @@ from daily_etf_analysis.domain import (
     EtfAnalysisResult,
     Trend,
 )
+from daily_etf_analysis.observability.metrics import inc_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,8 @@ class _LlmResultModel(BaseModel):
     risk_alerts: list[str] = Field(default_factory=list)
     summary: str
     key_points: list[str] = Field(default_factory=list)
+    horizon: str = "next_trading_day"
+    rationale: str = ""
 
 
 class EtfAnalyzer:
@@ -44,7 +48,9 @@ Output JSON only:
   "trend": "bullish|neutral|bearish",
   "action": "buy|hold|sell",
   "confidence": "low|medium|high",
+  "horizon": "next_trading_day",
   "risk_alerts": ["..."],
+  "rationale": "why this action for next session",
   "summary": "short summary",
   "key_points": ["...", "..."]
 }
@@ -53,6 +59,10 @@ Rules:
 - If data quality is low, lower confidence and mention uncertainty.
 - Never output markdown wrappers.
 """
+
+    _SENSITIVE_TEXT = re.compile(
+        r"(?i)(https?://\\S+|sk-[a-z0-9_\\-]+|token[=:]\\S+|api[_-]?key[=:]\\S+)"
+    )
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -119,9 +129,11 @@ Rules:
                 )
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("Empty LLM response")
+                inc_llm_call("success", model)
                 return content, model
             except Exception as exc:  # noqa: BLE001
                 logger.warning("LLM call failed with model %s: %s", model, exc)
+                inc_llm_call("failed", model)
                 last_error = exc
                 continue
         raise RuntimeError(f"All LLM models failed. Last error: {last_error}")
@@ -158,18 +170,48 @@ Rules:
             else:
                 raise ValueError("Repaired JSON payload has unsupported type")
             parsed: _LlmResultModel = _LlmResultModel.model_validate(payload)
+            risk_alerts = [
+                self._sanitize_output_text(item, max_len=120)
+                for item in parsed.risk_alerts
+                if self._sanitize_output_text(item, max_len=120)
+            ]
+            summary = self._sanitize_output_text(parsed.summary, max_len=240)
+            rationale = self._sanitize_output_text(
+                parsed.rationale or parsed.summary,
+                max_len=500,
+            )
+            key_points = [
+                self._sanitize_output_text(item, max_len=140)
+                for item in parsed.key_points
+                if self._sanitize_output_text(item, max_len=140)
+            ]
+            action = Action(parsed.action)
+            confidence = Confidence(parsed.confidence)
+            degraded = False
+            fallback_reason: str | None = None
+            if confidence == Confidence.LOW and action != Action.HOLD:
+                action = Action.HOLD
+                degraded = True
+                fallback_reason = "LOW_CONFIDENCE_FORCED_HOLD"
+                risk_alerts = list(risk_alerts) + [
+                    "Low confidence; action downgraded to hold."
+                ]
             return EtfAnalysisResult(
                 symbol=symbol,
                 score=parsed.score,
                 trend=Trend(parsed.trend),
-                action=Action(parsed.action),
-                confidence=Confidence(parsed.confidence),
-                summary=parsed.summary,
-                key_points=parsed.key_points,
-                risk_alerts=parsed.risk_alerts,
+                action=action,
+                confidence=confidence,
+                summary=summary,
+                key_points=key_points,
+                risk_alerts=risk_alerts,
                 model_used=model_used,
                 success=True,
                 raw_response=text,
+                horizon=parsed.horizon or "next_trading_day",
+                rationale=rationale,
+                degraded=degraded,
+                fallback_reason=fallback_reason,
             )
         except (json.JSONDecodeError, ValidationError, ValueError) as exc:
             return EtfAnalysisResult.neutral_fallback(
@@ -192,3 +234,10 @@ Rules:
             return EtfAnalysisResult.neutral_fallback(
                 symbol=context.symbol, error_message=str(exc)
             )
+
+    def _sanitize_output_text(self, text: object, *, max_len: int) -> str:
+        value = str(text).strip()
+        if not value:
+            return ""
+        value = self._SENSITIVE_TEXT.sub("***", value)
+        return value[:max_len]

@@ -7,9 +7,10 @@
 2. Verify generated artifacts:
    - JSON: `reports/daily_etf_<date>_<taskid>.json`
    - Markdown: `reports/report_YYYYMMDD.md`
-3. Verify history data:
-   - `GET /api/v1/history?page=1&limit=20`
-   - `GET /api/v1/history/{record_id}`
+3. Verify run/report/history contracts:
+   - `GET /api/v1/analysis/runs/{run_id}`
+   - `GET /api/v1/reports/daily?date=YYYY-MM-DD&market=all&run_id=<run_id>`
+   - `GET /api/v1/history/signals?run_id=<run_id>`
 4. Run backtest and inspect performance:
    - `POST /api/v1/backtest/run`
    - `GET /api/v1/backtest/performance?run_id=<run_id>`

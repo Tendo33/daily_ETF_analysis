@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from daily_etf_analysis.config.settings import Settings, get_settings
+from daily_etf_analysis.core.trading_calendar import is_market_open_today
+from daily_etf_analysis.domain import Market
 from daily_etf_analysis.observability.metrics import inc_scheduler_run
 from daily_etf_analysis.services.analysis_service import AnalysisService
 
@@ -63,6 +65,13 @@ class EtfScheduler:
             return
         if not _matches_simple_cron(cron_expr, now):
             return
+        market_enum = Market[market.upper()]
+        if not is_market_open_today(market_enum):
+            inc_scheduler_run(market, "skipped")
+            return
+        if not _is_after_market_close(market, now):
+            inc_scheduler_run(market, "skipped")
+            return
         marker = f"{market}:{now.strftime('%Y%m%d%H%M')}"
         if marker in self._last_run_marker:
             return
@@ -78,7 +87,13 @@ class EtfScheduler:
                     logger.exception("Scheduler callback failed: %s", exc)
                     inc_scheduler_run(market, "failed")
             else:
-                self.service.run_analysis(symbols=symbols, force_refresh=False)
+                if hasattr(self.service, "run_analysis_batch"):
+                    self.service.run_analysis_batch(  # type: ignore[attr-defined]
+                        symbols=symbols,
+                        force_refresh=False,
+                    )
+                else:
+                    self.service.run_analysis(symbols=symbols, force_refresh=False)
                 inc_scheduler_run(market, "success")
             logger.info("Scheduler triggered market=%s symbols=%s", market, symbols)
         else:
@@ -178,3 +193,19 @@ def next_run_for_cron(cron_expr: str, now: datetime) -> datetime | None:
                     if candidate > now:
                         return candidate
     return None
+
+
+def _is_after_market_close(market: str, now: datetime) -> bool:
+    close_by_market = {
+        "cn": (15, 0),
+        "hk": (16, 10),
+        "us": (16, 0),
+    }
+    market_key = market.lower()
+    if market_key not in close_by_market:
+        return True
+    close_hour, close_minute = close_by_market[market_key]
+    close_time = now.replace(
+        hour=close_hour, minute=close_minute, second=0, microsecond=0
+    )
+    return now >= close_time

@@ -2,10 +2,13 @@ from daily_etf_analysis.domain.enums import (
     Action,
     Confidence,
     Market,
+    TaskErrorCode,
     TaskStatus,
     Trend,
+    parse_task_status,
 )
 from daily_etf_analysis.domain.models import (
+    AnalysisRun,
     AnalysisTask,
     EtfAnalysisContext,
     EtfAnalysisResult,
@@ -23,6 +26,7 @@ from daily_etf_analysis.domain.symbols import (
 
 __all__ = [
     "Action",
+    "AnalysisRun",
     "AnalysisTask",
     "Confidence",
     "EtfAnalysisContext",
@@ -33,6 +37,8 @@ __all__ = [
     "IndexComparisonResult",
     "IndexComparisonRow",
     "Market",
+    "parse_task_status",
+    "TaskErrorCode",
     "TaskStatus",
     "Trend",
     "infer_market",

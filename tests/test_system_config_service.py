@@ -84,3 +84,34 @@ def test_analysis_service_applies_updated_settings_immediately(
     assert service.pipeline.settings.etf_list == ["CN:159659"]
     assert service.system_config_service.settings.etf_list == ["CN:159659"]
     assert service.task_manager.pipeline.settings.etf_list == ["CN:159659"]
+    service.shutdown()
+
+
+def test_analysis_service_replaces_and_shuts_down_old_task_manager(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    settings = _build_settings(tmp_path / "analysis-reload.db")
+    service = AnalysisService(settings=settings)
+    old_manager = service.task_manager
+    shutdown_calls = {"count": 0}
+    original_shutdown = old_manager.shutdown
+
+    def _counted_shutdown() -> None:
+        shutdown_calls["count"] += 1
+        original_shutdown()
+
+    monkeypatch.setattr(old_manager, "shutdown", _counted_shutdown)
+    monkeypatch.setattr(
+        "daily_etf_analysis.services.system_config_service.reload_settings",
+        lambda: settings,
+    )
+
+    _ = service.update_system_config(
+        expected_version=0,
+        updates={"etf_list": ["CN:159659"]},
+        actor="admin",
+    )
+
+    assert shutdown_calls["count"] == 1
+    assert service.task_manager is not old_manager
+    service.shutdown()

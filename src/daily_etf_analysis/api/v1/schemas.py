@@ -1,30 +1,42 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class RunAnalysisRequest(BaseModel):
+class AnalysisRunCreateRequest(BaseModel):
     symbols: list[str] | None = None
     markets: list[str] | None = None
     force_refresh: bool = False
+    force_retry: bool = False
+    source: str = "api"
+    run_window: str | None = None
 
 
-class TaskResponse(BaseModel):
-    task_id: str
+class AnalysisRunCreateResponse(BaseModel):
+    run_id: str
     status: str
+
+
+class AnalysisRunDetailResponse(BaseModel):
+    run_id: str
+    status: str
+    source: str
+    market: str
+    run_window: str | None = None
     symbols: list[str]
-    force_refresh: bool
-    created_at: datetime
-    updated_at: datetime
-    error: str | None = None
-
-
-class RunAnalysisResponse(BaseModel):
-    task_id: str
-    status: str
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+    total_tasks: int
+    completed_tasks: int
+    failed_tasks: int
+    cancelled_tasks: int
+    decision_quality: dict[str, Any]
+    failures: list[dict[str, Any]]
+    audit_logs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReplaceEtfsRequest(BaseModel):
@@ -35,9 +47,30 @@ class ReplaceIndexMappingsRequest(BaseModel):
     mappings: dict[str, list[str]]
 
 
-class DailyReportQuery(BaseModel):
-    date: date
-    market: str = "all"
+class DailyReportResponse(BaseModel):
+    run_summary: dict[str, Any]
+    symbol_results: list[dict[str, Any]]
+    decision_quality: dict[str, Any]
+    failures: list[dict[str, Any]]
+
+
+class HistorySignalsResponse(BaseModel):
+    items: list[dict[str, Any]]
+
+
+class ErrorDetailResponse(BaseModel):
+    code: str
+    message: str
+    request_id: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class HistorySignalsQuery(BaseModel):
+    symbol: str | None = None
+    run_id: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    limit: int = Field(default=200, ge=1, le=2000)
 
 
 class IndexComparisonRowResponse(BaseModel):
@@ -70,47 +103,6 @@ class ProviderHealthResponse(BaseModel):
     circuit_state: str
     last_error: str | None = None
     last_updated: str
-
-
-class HistoryListItemResponse(BaseModel):
-    id: int
-    task_id: str
-    symbol: str
-    trade_date: str
-    score: int
-    action: str
-    confidence: str
-    summary: str
-    success: bool
-    created_at: str
-
-
-class HistoryListResponse(BaseModel):
-    items: list[HistoryListItemResponse]
-    page: int
-    limit: int
-    total: int
-
-
-class HistoryDetailResponse(BaseModel):
-    id: int
-    task_id: str
-    symbol: str
-    trade_date: str
-    score: int
-    trend: str
-    action: str
-    confidence: str
-    summary: str
-    model_used: str | None = None
-    success: bool
-    error_message: str | None = None
-    factors: dict[str, Any]
-    key_points: list[str]
-    risk_alerts: list[str]
-    context_snapshot: dict[str, Any]
-    news_items: list[dict[str, Any]]
-    created_at: str
 
 
 class BacktestRunRequest(BaseModel):

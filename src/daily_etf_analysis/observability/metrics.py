@@ -6,6 +6,9 @@ from collections import defaultdict
 _LABEL_ORDER = {
     "api_requests_total": ("method", "path", "status"),
     "analysis_task_total": ("status",),
+    "analysis_runs_total": ("status", "source"),
+    "llm_calls_total": ("status", "model"),
+    "decision_quality_total": ("status",),
     "provider_calls_total": ("provider", "operation", "status"),
     "notification_delivery_total": ("channel", "status"),
     "scheduler_runs_total": ("market", "status"),
@@ -73,6 +76,18 @@ def inc_api_request(method: str, path: str, status: int) -> None:
 
 def inc_analysis_task(status: str) -> None:
     _REGISTRY.inc("analysis_task_total", (status.lower(),))
+
+
+def inc_analysis_run(status: str, source: str) -> None:
+    _REGISTRY.inc("analysis_runs_total", (status.lower(), source.lower()))
+
+
+def inc_llm_call(status: str, model: str) -> None:
+    _REGISTRY.inc("llm_calls_total", (status.lower(), model))
+
+
+def inc_decision_quality(status: str) -> None:
+    _REGISTRY.inc("decision_quality_total", (status.lower(),))
 
 
 def inc_provider_call(provider: str, operation: str, status: str) -> None:

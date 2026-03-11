@@ -84,3 +84,18 @@ def test_llm_fallback_model_used(monkeypatch) -> None:  # type: ignore[no-untype
     assert calls == ["openai/primary-model", "openai/fallback-model"]
     assert result.success is True
     assert result.model_used == "openai/fallback-model"
+
+
+def test_low_confidence_action_is_downgraded_to_hold() -> None:
+    settings = Settings(litellm_model="openai/gpt-4o-mini", llm_model_list=[])
+    analyzer = EtfAnalyzer(settings=settings)
+    raw = (
+        '{"score":65,"trend":"bullish","action":"buy","confidence":"low",'
+        '"risk_alerts":["volatility"],"summary":"cautious","key_points":["a"],'
+        '"horizon":"next_trading_day","rationale":"weak conviction"}'
+    )
+    result = analyzer._parse_response(raw, "US:QQQ", "openai/gpt-4o-mini")  # noqa: SLF001
+    assert result.success is True
+    assert result.action.value == "hold"
+    assert result.degraded is True
+    assert result.fallback_reason == "LOW_CONFIDENCE_FORCED_HOLD"

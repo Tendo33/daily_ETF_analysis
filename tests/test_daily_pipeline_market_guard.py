@@ -136,7 +136,9 @@ def test_pipeline_skips_closed_market_when_guard_enabled(monkeypatch) -> None:  
         skip_market_guard=False,
     )
 
-    assert results == []
+    assert results.analyzed_count == 0
+    assert results.skipped_count == 1
+    assert results.skipped_symbols == ["CN:159659"]
     assert fetcher.daily_calls == 0
     assert fetcher.quote_calls == 0
     assert repo.saved_reports == []
@@ -156,7 +158,8 @@ def test_pipeline_runs_closed_market_when_guard_disabled(monkeypatch) -> None:  
         skip_market_guard=True,
     )
 
-    assert len(results) == 1
+    assert results.analyzed_count == 1
+    assert results.skipped_count == 0
     assert fetcher.daily_calls == 1
     assert fetcher.quote_calls == 1
     assert len(repo.saved_reports) == 1
@@ -176,7 +179,8 @@ def test_pipeline_persists_context_snapshot_and_news(monkeypatch) -> None:  # ty
         skip_market_guard=False,
     )
 
-    assert len(results) == 1
+    assert results.analyzed_count == 1
+    assert results.skipped_count == 0
     saved = repo.saved_reports[0]
     snapshot = saved["context_snapshot"]
     assert isinstance(snapshot, dict)

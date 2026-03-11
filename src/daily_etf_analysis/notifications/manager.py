@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 
 from daily_etf_analysis.config.settings import Settings, get_settings
@@ -17,6 +18,10 @@ from daily_etf_analysis.notifications.wechat import WechatNotifier
 from daily_etf_analysis.observability.metrics import (
     inc_md2img,
     inc_notification_delivery,
+)
+
+_SENSITIVE_REASON_PATTERN = re.compile(
+    r"(?i)(https?://\S+|sk-[a-z0-9_\-]+|token[=:]\S+|api[_-]?key[=:]\S+)"
 )
 
 
@@ -67,8 +72,11 @@ class NotificationManager:
                     )
                     send_image = getattr(notifier, "send_image", None)
                     if image_bytes and callable(send_image):
-                        channel_results[channel] = send_image(
+                        raw_result = send_image(
                             title, image_bytes, filename="daily_etf_report.png"
+                        )
+                        channel_results[channel] = _sanitize_notification_result(
+                            raw_result
                         )
                         if channel_results[channel].sent:
                             inc_md2img(channel, "success")
@@ -80,14 +88,16 @@ class NotificationManager:
                                 "Markdown-to-image skipped for channel=%s", channel
                             )
                             inc_md2img(channel, "failed")
-                        channel_results[channel] = notifier.send_markdown(
-                            title, markdown
+                        raw_result = notifier.send_markdown(title, markdown)
+                        channel_results[channel] = _sanitize_notification_result(
+                            raw_result
                         )
                 else:
-                    channel_results[channel] = notifier.send_markdown(title, markdown)
+                    raw_result = notifier.send_markdown(title, markdown)
+                    channel_results[channel] = _sanitize_notification_result(raw_result)
             except Exception as exc:  # noqa: BLE001
                 channel_results[channel] = NotificationResult(
-                    sent=False, reason=str(exc)
+                    sent=False, reason=_sanitize_reason(exc)
                 )
             delivery_status = "success" if channel_results[channel].sent else "failed"
             if channel_results[channel].reason == "disabled":
@@ -111,3 +121,15 @@ class NotificationManager:
             reason=reason,
             channel_results=channel_results,
         )
+
+
+def _sanitize_reason(value: object) -> str:
+    text = str(value).strip()
+    if not text:
+        return "unknown"
+    masked = _SENSITIVE_REASON_PATTERN.sub("***", text)
+    return masked[:200]
+
+
+def _sanitize_notification_result(result: NotificationResult) -> NotificationResult:
+    return NotificationResult(sent=result.sent, reason=_sanitize_reason(result.reason))

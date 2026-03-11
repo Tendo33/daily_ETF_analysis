@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import re
+import threading
+import uuid
 from datetime import date
 
 from daily_etf_analysis.backtest import BacktestEngine
 from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.domain import (
+    AnalysisRun,
     AnalysisTask,
     EtfInstrument,
     IndexComparisonResult,
     IndexComparisonRow,
+    TaskStatus,
     normalize_symbol,
 )
 from daily_etf_analysis.observability import get_provider_health_snapshot
+from daily_etf_analysis.observability.metrics import (
+    inc_analysis_run,
+    inc_decision_quality,
+)
 from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
+from daily_etf_analysis.repositories.schema_guard import ensure_schema_ready
 from daily_etf_analysis.services.data_lifecycle_service import DataLifecycleService
 from daily_etf_analysis.services.system_config_service import SystemConfigService
 from daily_etf_analysis.services.task_manager import TaskManager
@@ -21,13 +31,17 @@ from daily_etf_analysis.services.task_manager import TaskManager
 
 class AnalysisService:
     def __init__(self, settings: Settings | None = None) -> None:
+        self._runtime_lock = threading.Lock()
         self.settings = settings or get_settings()
         self.repository = EtfRepository(self.settings)
+        ensure_schema_ready(self.repository.engine, self.settings)
         self.pipeline = DailyPipeline(
             settings=self.settings, repository=self.repository
         )
         self.task_manager = TaskManager(
-            repository=self.repository, pipeline=self.pipeline
+            repository=self.repository,
+            pipeline=self.pipeline,
+            settings=self.settings,
         )
         self.system_config_service = SystemConfigService(
             settings=self.settings, repository=self.repository
@@ -43,16 +57,169 @@ class AnalysisService:
         force_refresh: bool = False,
         skip_market_guard: bool = False,
         request_id: str | None = None,
+        force_retry: bool = False,
+        run_id: str | None = None,
+        run_window: str | None = None,
     ) -> AnalysisTask:
+        tasks = self.run_analysis_batch(
+            symbols=symbols,
+            force_refresh=force_refresh,
+            skip_market_guard=skip_market_guard,
+            request_id=request_id,
+            force_retry=force_retry,
+            run_id=run_id,
+            run_window=run_window,
+        )
+        return tasks[0]
+
+    def run_analysis_batch(
+        self,
+        symbols: list[str] | None = None,
+        force_refresh: bool = False,
+        skip_market_guard: bool = False,
+        request_id: str | None = None,
+        force_retry: bool = False,
+        run_id: str | None = None,
+        run_window: str | None = None,
+    ) -> list[AnalysisTask]:
         target_symbols = [
             normalize_symbol(s) for s in (symbols or self.settings.etf_list)
         ]
-        return self.task_manager.submit(
+        return self.task_manager.submit_many(
             target_symbols,
             force_refresh=force_refresh,
             skip_market_guard=skip_market_guard,
             request_id=request_id,
+            force_retry=force_retry,
+            run_id=run_id,
+            run_window=run_window,
         )
+
+    def create_analysis_run(
+        self,
+        *,
+        symbols: list[str] | None = None,
+        markets: list[str] | None = None,
+        force_refresh: bool = False,
+        force_retry: bool = False,
+        source: str = "manual",
+        request_id: str | None = None,
+        run_window: str | None = None,
+    ) -> AnalysisRun:
+        target_symbols = [
+            normalize_symbol(s) for s in (symbols or self.settings.etf_list)
+        ]
+        if markets:
+            allowed = {m.lower() for m in markets}
+            target_symbols = [
+                s for s in target_symbols if s.split(":", 1)[0].lower() in allowed
+            ]
+        if not target_symbols:
+            raise ValueError("No symbols resolved for run.")
+        run_id = uuid.uuid4().hex
+        market = "all"
+        if markets and len(markets) == 1:
+            market = markets[0].lower()
+        self.repository.create_analysis_run(
+            run_id=run_id,
+            symbols=target_symbols,
+            source=source,
+            market=market,
+            run_window=run_window,
+        )
+        self.repository.create_analysis_run_audit_log(
+            run_id=run_id,
+            event_type="run_created",
+            payload={
+                "source": source,
+                "symbols": target_symbols,
+                "force_refresh": force_refresh,
+                "request_id": request_id,
+                "run_window": run_window,
+            },
+        )
+        self.repository.set_analysis_run_status(run_id, TaskStatus.PROCESSING)
+        inc_analysis_run(TaskStatus.PROCESSING.value, source)
+        try:
+            self.run_analysis_batch(
+                symbols=target_symbols,
+                force_refresh=force_refresh,
+                skip_market_guard=force_refresh,
+                request_id=request_id,
+                force_retry=force_retry,
+                run_id=run_id,
+                run_window=run_window,
+            )
+        except Exception:
+            self.repository.set_analysis_run_status(run_id, TaskStatus.FAILED)
+            inc_analysis_run(TaskStatus.FAILED.value, source)
+            raise
+        created = self.repository.get_analysis_run(run_id)
+        if created is None:
+            raise RuntimeError("Run created but unavailable in repository.")
+        return created
+
+    def get_analysis_run(self, run_id: str) -> AnalysisRun | None:
+        run = self.repository.get_analysis_run(run_id)
+        if run is None:
+            return None
+        self.repository.refresh_analysis_run_from_tasks(run_id)
+        refreshed = self.repository.get_analysis_run(run_id)
+        return refreshed or run
+
+    def build_run_contract(self, run_id: str) -> dict[str, object] | None:
+        run = self.get_analysis_run(run_id)
+        if run is None:
+            return None
+        tasks = self.repository.list_tasks_by_run(run_id)
+        failures = self.repository.list_failures_by_run(run_id)
+        audit_logs = self.repository.list_analysis_run_audit_logs(run_id, limit=50)
+        total = len(tasks)
+        completed = sum(1 for item in tasks if item.status == TaskStatus.COMPLETED)
+        degraded = len(
+            [
+                row
+                for row in self.repository.list_signals_v2(run_id=run_id, limit=2000)
+                if bool(row.get("degraded"))
+            ]
+        )
+        decision_quality = {
+            "total": total,
+            "completed": completed,
+            "failed": run.failed_tasks,
+            "cancelled": run.cancelled_tasks,
+            "degraded_count": degraded,
+            "success_rate": (completed / total) if total else 0.0,
+        }
+        self.repository.update_analysis_run_quality(
+            run_id,
+            decision_quality=decision_quality,
+            failure_summary={"count": len(failures), "items": failures[:20]},
+        )
+        if decision_quality["degraded_count"] > 0:
+            inc_decision_quality("degraded")
+        else:
+            inc_decision_quality("clean")
+        run = self.get_analysis_run(run_id)
+        assert run is not None
+        return {
+            "run_id": run.run_id,
+            "status": run.status.value,
+            "source": run.source,
+            "market": run.market,
+            "run_window": run.run_window,
+            "symbols": run.symbols,
+            "created_at": run.created_at.isoformat(),
+            "updated_at": run.updated_at.isoformat(),
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "total_tasks": run.total_tasks,
+            "completed_tasks": run.completed_tasks,
+            "failed_tasks": run.failed_tasks,
+            "cancelled_tasks": run.cancelled_tasks,
+            "decision_quality": run.decision_quality,
+            "failures": failures,
+            "audit_logs": audit_logs,
+        }
 
     def list_tasks(self, limit: int = 50) -> list[AnalysisTask]:
         return self.task_manager.list_tasks(limit=limit)
@@ -135,6 +302,57 @@ class AnalysisService:
         market_filter = None if market in (None, "all") else market
         return self.repository.get_daily_reports(target_date, market=market_filter)
 
+    def get_daily_report_contract(
+        self,
+        *,
+        target_date: date,
+        market: str = "all",
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        rows = self.get_daily_report(target_date=target_date, market=market)
+        symbol_results = [
+            {
+                "run_id": row.get("run_id"),
+                "task_id": row.get("task_id"),
+                "symbol": row.get("symbol"),
+                "trade_date": row.get("trade_date"),
+                "score": row.get("score"),
+                "trend": row.get("trend"),
+                "action": row.get("action"),
+                "confidence": row.get("confidence"),
+                "horizon": row.get("horizon") or "next_trading_day",
+                "risk_alerts": row.get("risk_alerts", []),
+                "rationale": row.get("rationale") or row.get("summary", ""),
+                "degraded": bool(row.get("degraded", False)),
+                "fallback_reason": row.get("fallback_reason"),
+            }
+            for row in rows
+            if run_id is None or row.get("run_id") == run_id
+        ]
+        failures = []
+        if run_id:
+            failures = self.repository.list_failures_by_run(run_id)
+        total = len(symbol_results)
+        degraded_count = sum(1 for row in symbol_results if row["degraded"])
+        success_count = sum(1 for row in symbol_results if not row["degraded"])
+        return {
+            "run_summary": {
+                "run_id": run_id,
+                "date": target_date.isoformat(),
+                "market": market,
+                "total_symbols": total,
+                "generated_at": date.today().isoformat(),
+            },
+            "symbol_results": symbol_results,
+            "decision_quality": {
+                "total": total,
+                "degraded_count": degraded_count,
+                "fallback_count": degraded_count,
+                "success_rate": (success_count / total) if total else 0.0,
+            },
+            "failures": failures,
+        }
+
     def get_recent_signals(
         self, symbols: list[str], limit: int
     ) -> dict[str, list[dict[str, object]]]:
@@ -151,7 +369,15 @@ class AnalysisService:
         return {"items": items, "page": page, "limit": limit, "total": total}
 
     def get_history_detail(self, record_id: int) -> dict[str, object] | None:
-        return self.repository.get_history_record(record_id)
+        payload = self.repository.get_history_record(record_id)
+        if payload is None:
+            return None
+        result = dict(payload)
+        if isinstance(result.get("error_message"), str):
+            result["error_message"] = _sanitize_error_message(
+                str(result["error_message"])
+            )
+        return result
 
     def get_history_news(self, record_id: int) -> list[dict[str, object]] | None:
         record = self.repository.get_history_record(record_id)
@@ -161,6 +387,24 @@ class AnalysisService:
         if isinstance(news, list):
             return [item for item in news if isinstance(item, dict)]
         return []
+
+    def list_history_signals(
+        self,
+        *,
+        symbol: str | None = None,
+        run_id: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        normalized_symbol = normalize_symbol(symbol) if symbol else None
+        return self.repository.list_signals_v2(
+            symbol=normalized_symbol,
+            run_id=run_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
 
     def run_backtest(
         self, symbols: list[str] | None = None, eval_window_days: int = 20
@@ -321,13 +565,22 @@ class AnalysisService:
         return get_provider_health_snapshot()
 
     def _apply_runtime_settings(self, settings: Settings) -> None:
-        self.settings = settings
-        self.repository.settings = settings
-        self.pipeline = DailyPipeline(settings=settings, repository=self.repository)
-        self.task_manager = TaskManager(
-            repository=self.repository, pipeline=self.pipeline
-        )
-        self.system_config_service.settings = settings
+        with self._runtime_lock:
+            old_task_manager = self.task_manager
+            old_task_manager.shutdown()
+            self.settings = settings
+            self.repository.settings = settings
+            self.pipeline = DailyPipeline(settings=settings, repository=self.repository)
+            self.task_manager = TaskManager(
+                repository=self.repository,
+                pipeline=self.pipeline,
+                settings=settings,
+            )
+            self.system_config_service.settings = settings
+
+    def shutdown(self) -> None:
+        with self._runtime_lock:
+            self.task_manager.shutdown()
 
 
 def _confidence_weight(value: str) -> int:
@@ -349,3 +602,13 @@ def _to_float_or_none(value: object) -> float | None:
         return float(str(value))
     except (TypeError, ValueError):
         return None
+
+
+_SENSITIVE_VALUE_PATTERN = re.compile(
+    r"(?i)(sk-[a-z0-9_\-]{8,}|token[=:][^\s,;]+|apikey[=:][^\s,;]+|password[=:][^\s,;]+)"
+)
+
+
+def _sanitize_error_message(value: str) -> str:
+    masked = _SENSITIVE_VALUE_PATTERN.sub("***", value)
+    return masked[:240]
