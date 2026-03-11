@@ -1,60 +1,141 @@
 # daily_ETF_analysis
 
-面向 A 股 / 港股 / 美股大盘 ETF 的智能分析系统。  
-V1 目标是稳定产出结构化分析结果（不是只生成文案），并通过 API 提供 run 追踪、统一日报与建议历史检索。
+[中文文档](README_CN.md)
 
-## 核心能力
+`daily_ETF_analysis` is a production-oriented ETF analysis service for CN/HK/US markets.
+It focuses on stable, structured outputs (scores, trend/action signals, confidence, risk alerts, run contracts), not only free-form text.
 
-- 三地市场 ETF 统一标识：`<MARKET>:<CODE>`，例如 `CN:159659`、`US:QQQ`、`HK:02800`
-- 行情多源矩阵与优先级切换：`efinance -> akshare -> tushare/pytdx -> baostock -> yfinance`
-- Provider 稳定性：统一 `retry + backoff + circuit breaker`，并暴露健康统计 API
-- 可观测性基线：`/api/metrics`（Prometheus text 格式）
-- 新闻增强：Tavily（多 key、缓存、时效过滤）
-- LLM 直接生成信号与摘要：`score/trend/action/confidence/risk_alerts/summary/key_points/model_used`
-- 指数映射对比：按 `index_symbol + date` 输出跨市场 ETF 排序
-- 历史追溯：`history/signals` 按 run/symbol/date 可筛选查询
-- 回测能力：`backtest` 运行与 run/symbol 双层绩效
-- 系统配置中心：`get/validate/update/schema/audit`（支持版本检查）
-- 任务化执行：`pending -> processing -> completed | failed`
-- 通知中心（feishu/wechat/telegram/email）与每日运行入口脚本
-- 持久化：SQLite + SQLAlchemy + Alembic
+## Table of Contents
 
-## 项目结构
+1. [Overview](#overview)
+2. [Core Features](#core-features)
+3. [Architecture](#architecture)
+4. [Project Layout](#project-layout)
+5. [Quick Start](#quick-start)
+6. [Run Modes](#run-modes)
+7. [Configuration](#configuration)
+8. [API Guide](#api-guide)
+9. [Database and Migrations](#database-and-migrations)
+10. [Reports and Artifacts](#reports-and-artifacts)
+11. [Observability and Operations](#observability-and-operations)
+12. [Security](#security)
+13. [Development Workflow](#development-workflow)
+14. [CI Workflows](#ci-workflows)
+15. [Troubleshooting](#troubleshooting)
+16. [Documentation Map](#documentation-map)
+17. [License and Disclaimer](#license-and-disclaimer)
+
+## Overview
+
+This service analyzes a configurable ETF universe using:
+
+- Multi-source market data providers with resilience controls
+- News enrichment (Tavily)
+- LLM-based decision generation with fallback/degradation logic
+- Persistent run/task/report history via SQLite + SQLAlchemy + Alembic
+
+Symbol format is unified as `<MARKET>:<CODE>`, for example:
+
+- `CN:159659`
+- `US:QQQ`
+- `HK:02800`
+
+## Core Features
+
+- Unified analysis runs with status tracking (`pending -> processing -> completed|failed|cancelled`)
+- Cross-market ETF and index mapping contracts
+- Data provider priority and fallback matrix:
+  - `efinance -> akshare -> tushare/pytdx -> baostock -> yfinance`
+- Provider resilience: retry, backoff, circuit breaker, provider health API
+- Structured decision outputs:
+  - `score`, `trend`, `action`, `confidence`, `risk_alerts`, `summary`, `key_points`, `horizon`, `rationale`
+- History APIs for signal retrieval and run replay
+- Built-in backtest endpoints and per-symbol performance views
+- System config APIs (read/validate/update/schema/audit)
+- Data lifecycle retention cleanup
+- Multi-channel notifications:
+  - Feishu, WeChat, Telegram, Email
+- Prometheus-style metrics endpoint (`/api/metrics`)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Client (CLI/API/Scheduler)"] --> B["FastAPI / CLI Entrypoints"]
+    B --> C["AnalysisService"]
+    C --> D["Market Data Providers"]
+    C --> E["News Provider (Tavily)"]
+    C --> F["LLM Analyzer (LiteLLM)"]
+    C --> G["Repository (SQLAlchemy)"]
+    G --> H["SQLite"]
+    C --> I["Report Renderer"]
+    C --> J["Notification Manager"]
+```
+
+Layering follows:
+
+- `api`: HTTP contracts and auth guards
+- `services`: orchestration and business flow
+- `repositories`: persistence and schema guard
+- `domain`: core models/enums/value normalization
+
+## Project Layout
 
 ```text
 src/daily_etf_analysis/
-├── api/               # FastAPI 路由
-├── config/            # Settings 与配置优先级解析
-├── core/              # 交易日判断
-├── domain/            # ETF 领域模型与 symbol 规范
-├── llm/               # EtfAnalyzer（LiteLLM Router + fallback）
-├── pipelines/         # DailyPipeline 编排
-├── providers/         # 行情/新闻 Provider
-├── repositories/      # 数据库读写
-├── scheduler/         # 定时调度
-└── services/          # TaskManager / AnalysisService / 因子计算
+├── api/                # FastAPI app, auth, v1 routes/schemas
+├── backtest/           # Backtest engine and models
+├── cli/                # CLI entrypoints
+├── config/             # Pydantic settings and validation
+├── core/               # Trading calendar and time utilities
+├── domain/             # ETF domain models and symbol rules
+├── llm/                # ETF decision engine (LiteLLM)
+├── notifications/      # Feishu/WeChat/Telegram/Email + markdown image
+├── observability/      # metrics and logging
+├── pipelines/          # Daily workflow pipeline
+├── providers/          # Market data + news providers
+├── repositories/       # DB access + schema guard
+├── reports/            # Markdown rendering
+└── scheduler/          # Cron scheduler
+
+scripts/                # Operational and maintenance scripts
+docs/operations/        # Runbooks (phase3/phase4)
+examples/               # Small usage examples
+tests/                  # Unit/integration/contract tests
 ```
 
-## 快速开始
+## Quick Start
 
-1. 安装依赖
+### 1. Prerequisites
+
+- Python `>=3.11`
+- [uv](https://docs.astral.sh/uv/)
+- Network access to your configured providers/LLM endpoints
+
+### 2. Install dependencies
 
 ```bash
 uv sync --all-extras
 ```
 
-2. 准备环境变量
+### 3. Create local env file
 
 ```bash
 cp .env.example .env
 ```
 
-3. 最小必填配置（建议先保证可跑通）
+### 4. Minimal configuration
+
+At minimum, set your target ETF list and DB path (defaults are already provided):
 
 ```env
 ETF_LIST=CN:159659,US:QQQ,HK:02800
-INDEX_PROXY_MAP={"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}
 DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
+```
+
+For full-quality output (recommended), configure LLM + news:
+
+```env
 LLM_CHANNELS=aihubmix
 LLM_AIHUBMIX_BASE_URL=https://aihubmix.com/v1
 LLM_AIHUBMIX_API_KEY=sk-xxxx
@@ -62,164 +143,232 @@ LLM_AIHUBMIX_MODELS=gpt-4o-mini
 TAVILY_API_KEYS=tvly-xxxx
 ```
 
-兼容说明：`TASK_QUEUE_MAX_SIZE` 与 `TASK_DEDUP_WINDOW_SECONDS` 当前仅保留配置键，运行时不再驱动队列策略（使用活跃任务去重）。
-
-4. 启动 API
+### 5. Start API server
 
 ```bash
 uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
 ```
 
-5. 验证服务
+### 6. Verify health
 
 ```bash
 curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/metrics
 ```
 
-OpenAPI 文档：
-- `http://127.0.0.1:8000/docs`
-- `http://127.0.0.1:8000/redoc`
-
-## 数据源优先级（Phase 2）
-
-默认 `REALTIME_SOURCE_PRIORITY`：
-
-```env
-REALTIME_SOURCE_PRIORITY=efinance,akshare,tushare,pytdx,baostock,yfinance
-```
-
-- `efinance`（Priority 0）
-- `akshare`（Priority 1）
-- `tushare` / `pytdx`（Priority 2）
-- `baostock`（Priority 3）
-- `yfinance`（Priority 4，US 主源 + fallback）
-
-## LLM 配置优先级
-
-当前实现采用三层优先级（由高到低）：
-
-1. `LITELLM_CONFIG`（YAML `model_list`）
-2. `LLM_CHANNELS`（渠道模式）
-3. legacy keys（`OPENAI_*`, `GEMINI_*`, `ANTHROPIC_*`, `DEEPSEEK_*`）
-
-当主模型失败时，会按 fallback 列表继续尝试；全失败时返回中性降级结果：
-- `success=false`
-- `score=50`
-- `trend=neutral`
-- `action=hold`
-
-## API 快速示例
-
-创建一次分析运行（run）：
+### 7. Trigger one analysis run
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
   -H "Content-Type: application/json" \
-  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"],"force_refresh":false}'
+  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"]}'
 ```
 
-返回 `202 Accepted`，包含 `run_id` 与初始 `status`。
+OpenAPI docs:
 
-查询运行状态：
+- `http://127.0.0.1:8000/docs`
+- `http://127.0.0.1:8000/redoc`
+
+## Run Modes
+
+### API only
+
+```bash
+uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
+```
+
+### One-shot daily analysis (CLI)
+
+```bash
+uv run python scripts/run_daily_analysis.py
+```
+
+Common options:
+
+```bash
+uv run python scripts/run_daily_analysis.py --force-run --market cn
+uv run python scripts/run_daily_analysis.py --symbols CN:159659,US:QQQ --skip-notify
+uv run python scripts/run_daily_analysis.py --wait-timeout-seconds 900 --poll-interval-seconds 2
+```
+
+### Main entrypoint (`main.py`)
+
+```bash
+# Run API + scheduler (if enabled)
+uv run python main.py --serve --schedule
+
+# API only
+uv run python main.py --serve-only
+
+# Run market review only
+uv run python main.py --market-review --no-notify
+```
+
+### Dedicated scheduler process
+
+```bash
+uv run python scripts/run_scheduler.py
+```
+
+Notes:
+
+- Scheduler cron expression format is `sec min hour day month weekday` (6 fields).
+- `scripts/run_scheduler.py` currently executes CN market runs only by design.
+
+## Configuration
+
+All config is loaded via `pydantic-settings` from:
+
+1. environment variables
+2. `.env`
+3. defaults in code
+
+### Key configuration groups
+
+- Universe and mappings
+  - `ETF_LIST`, `INDEX_PROXY_MAP`, `MARKETS_ENABLED`
+- Data source priority and resilience
+  - `REALTIME_SOURCE_PRIORITY`
+  - `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_MS`, `PROVIDER_CIRCUIT_FAIL_THRESHOLD`, `PROVIDER_CIRCUIT_RESET_SECONDS`
+- LLM
+  - priority: `LITELLM_CONFIG > LLM_CHANNELS > legacy keys`
+- News
+  - `TAVILY_API_KEYS`, `NEWS_MAX_AGE_DAYS`, `NEWS_PROVIDER_PRIORITY`
+- Notifications
+  - `NOTIFY_CHANNELS`, `FEISHU_WEBHOOK_URL`, `WECHAT_WEBHOOK_URL`, `TELEGRAM_*`, `EMAIL_*`
+- Runtime and reliability
+  - `TASK_MAX_CONCURRENCY`, `TASK_TIMEOUT_SECONDS`
+- Retention / lifecycle
+  - `RETENTION_TASK_DAYS`, `RETENTION_REPORT_DAYS`, `RETENTION_QUOTE_DAYS`
+- API auth
+  - `API_AUTH_ENABLED`, `API_ADMIN_TOKEN`
+- Scheduler
+  - `SCHEDULE_ENABLED`, `SCHEDULE_CRON_CN/HK/US`
+
+### Auth behavior
+
+When `API_AUTH_ENABLED=true`:
+
+- all `/api/v1/*` endpoints require `Authorization: Bearer <API_ADMIN_TOKEN>`
+- `/api/health` and `/api/metrics` remain public
+
+When `API_AUTH_ENABLED=false` (default):
+
+- `/api/v1/*` works without token
+
+## API Guide
+
+### Typical flow
+
+1. Create run
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["US:QQQ"],"force_refresh":false}'
+```
+
+2. Query run status
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/analysis/runs/<run_id>
 ```
 
-查询统一日报契约：
+3. Fetch daily report contract
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/reports/daily?date=2026-03-09&market=all&run_id=<run_id>"
+curl "http://127.0.0.1:8000/api/v1/reports/daily?date=2026-03-10&market=all&run_id=<run_id>"
 ```
 
-查询建议历史（signals）：
+4. Fetch historical signals
 
 ```bash
 curl "http://127.0.0.1:8000/api/v1/history/signals?symbol=US:QQQ&run_id=<run_id>"
 ```
 
-查询单 ETF 实时行情：
+### Endpoint index
+
+- Analysis
+  - `POST /api/v1/analysis/runs`
+  - `GET /api/v1/analysis/runs/{run_id}`
+- Reports and history
+  - `GET /api/v1/reports/daily`
+  - `GET /api/v1/history/signals`
+- ETF and index mapping
+  - `GET /api/v1/etfs`
+  - `PUT /api/v1/etfs`
+  - `GET /api/v1/index-mappings`
+  - `PUT /api/v1/index-mappings`
+  - `GET /api/v1/etfs/{symbol}/quote`
+  - `GET /api/v1/etfs/{symbol}/history`
+  - `GET /api/v1/index-comparisons`
+- Backtest
+  - `POST /api/v1/backtest/run`
+  - `GET /api/v1/backtest/results`
+  - `GET /api/v1/backtest/performance`
+  - `GET /api/v1/backtest/performance/{symbol}`
+- System
+  - `GET /api/v1/system/provider-health`
+  - `GET /api/v1/system/config`
+  - `POST /api/v1/system/config/validate`
+  - `PUT /api/v1/system/config`
+  - `GET /api/v1/system/config/schema`
+  - `GET /api/v1/system/config/audit`
+  - `POST /api/v1/system/lifecycle/cleanup`
+- Public
+  - `GET /api/health`
+  - `GET /api/metrics`
+
+## Database and Migrations
+
+Default database is SQLite:
+
+- `DATABASE_URL=sqlite:///./data/daily_etf_analysis.db`
+
+Schema management:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/etfs/US:QQQ/quote
-```
-
-查询指数映射对比：
-
-```bash
-curl "http://127.0.0.1:8000/api/v1/index-comparisons?index_symbol=NDX&date=2026-03-09"
-```
-
-查询 Provider 健康状态：
-
-```bash
-curl "http://127.0.0.1:8000/api/v1/system/provider-health"
-```
-
-查询系统指标：
-
-```bash
-curl "http://127.0.0.1:8000/api/metrics"
-```
-
-运行回测：
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/backtest/run \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["US:QQQ"],"eval_window_days":20}'
-```
-
-查询系统配置：
-
-```bash
-curl "http://127.0.0.1:8000/api/v1/system/config"
-```
-
-生命周期清理（默认 dry-run）：
-
-```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/system/lifecycle/cleanup?dry_run=true"
-```
-
-## API 端点清单
-
-- `POST /api/v1/analysis/runs`
-- `GET /api/v1/analysis/runs/{run_id}`
-- `GET /api/v1/reports/daily?date=YYYY-MM-DD&market=all|cn|hk|us&run_id=<run_id>`
-- `GET /api/v1/history/signals?symbol=US:QQQ&run_id=<run_id>&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&limit=200`
-- `GET /api/v1/etfs`
-- `PUT /api/v1/etfs`
-- `GET /api/v1/index-mappings`
-- `PUT /api/v1/index-mappings`
-- `GET /api/v1/etfs/{symbol}/quote`
-- `GET /api/v1/etfs/{symbol}/history?days=120`
-- `POST /api/v1/backtest/run`
-- `GET /api/v1/backtest/results?run_id=<run_id>`
-- `GET /api/v1/backtest/performance?run_id=<run_id>`
-- `GET /api/v1/backtest/performance/{symbol}?run_id=<run_id>`
-- `GET /api/v1/index-comparisons?index_symbol=NDX&date=YYYY-MM-DD`
-- `GET /api/v1/system/provider-health`
-- `GET /api/v1/system/config`
-- `POST /api/v1/system/config/validate`
-- `PUT /api/v1/system/config`
-- `GET /api/v1/system/config/schema`
-- `GET /api/v1/system/config/audit`
-- `POST /api/v1/system/lifecycle/cleanup?dry_run=true|false`
-- `GET /api/health`
-- `GET /api/metrics`
-
-## 数据库与迁移
-
-- 默认使用 SQLite，路径来自 `DATABASE_URL`（默认 `./data/daily_etf_analysis.db`）
-- 代码首次运行会自动建表（`SQLAlchemy metadata.create_all`）
-- 若你希望按迁移管理 schema，可使用 Alembic：
-
-```bash
+# apply latest migrations
 uv run alembic upgrade head
+
+# rollback one revision (example)
+uv run alembic downgrade 20260310_0002
 ```
 
-## 配置检查与连通性自检
+Safe upgrade helper with backup + post-check:
+
+```bash
+uv run python scripts/db_upgrade.py --backup-dir data/backups
+```
+
+Backup / restore / DR drill:
+
+```bash
+uv run python scripts/backup_db.py --output-dir backups
+uv run python scripts/restore_db.py --backup-file backups/<backup>.db
+uv run python scripts/drill_recovery.py --backup-dir backups
+```
+
+## Reports and Artifacts
+
+Daily run output files:
+
+- `reports/daily_etf_<date>_<taskid8>.json`
+- `reports/report_YYYYMMDD_<taskid8>.md`
+- `reports/report_YYYYMMDD.md` (latest compatible path, overwritten)
+
+CLI stdout returns a structured JSON summary including:
+
+- task/run IDs
+- aggregate status
+- report paths
+- decision quality
+- failures
+- per-channel notification results
+
+## Observability and Operations
+
+### Config and provider checks
 
 ```bash
 uv run python scripts/test_env.py --config
@@ -227,73 +376,40 @@ uv run python scripts/test_env.py --fetch --symbol CN:159659
 uv run python scripts/test_env.py --llm
 ```
 
-## 每日运行脚本（Phase 2）
+### Daily self-check
 
 ```bash
-uv run python scripts/run_daily_analysis.py
+uv run python scripts/daily_self_check.py
 ```
 
-常用参数：
+### Security baseline scan
 
 ```bash
-uv run python scripts/run_daily_analysis.py --force-run --market cn
-uv run python scripts/run_daily_analysis.py --symbols CN:159659,US:QQQ --skip-notify
+uv run python scripts/security_scan.py
 ```
 
-输出：
-- `reports/daily_etf_<date>_<taskid>.json`
-- `reports/report_YYYYMMDD_<taskid8>.md`
-- `reports/report_YYYYMMDD.md`（兼容旧路径，最新一次运行会覆盖）
-- 标准输出 JSON（包含 `task_id/task_ids/status/report_path/markdown_report_path/notification_sent/notification_channels`）
+### Runbooks
 
-## 通知中心（Phase 3）
+- Phase 3: `docs/operations/phase3-runbook.md`
+- Phase 4: `docs/operations/phase4-runbook.md`
 
-配置：
+## Security
 
-```env
-NOTIFY_CHANNELS=feishu,wechat,telegram,email
-FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxxx
-WECHAT_WEBHOOK_URL=
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-EMAIL_SMTP_HOST=
-EMAIL_SMTP_PORT=25
-EMAIL_FROM=
-EMAIL_TO=
-```
-
-行为：
-- 未配置渠道返回 `disabled`，不阻断任务。
-- 单渠道失败不阻断其他渠道发送。
-- 输出包含 `notification_channels` 聚合结果。
-
-## API 写接口鉴权（Phase 3）
+- Keep `.env` local and never commit real secrets.
+- Enable API token auth for non-local environments:
 
 ```env
 API_AUTH_ENABLED=true
-API_ADMIN_TOKEN=replace-with-strong-token
+API_ADMIN_TOKEN=<strong-random-token>
 ```
 
-- 当 `API_AUTH_ENABLED=false`（默认）时，兼容旧行为。
-- 当启用后，所有写接口（`POST/PUT`）需 `Authorization: Bearer <API_ADMIN_TOKEN>`。
+- Notification channels are fail-soft by design:
+  - missing credentials return `disabled`
+  - one channel failure does not block others
 
-## GitHub 每日分析 CI（Phase 2）
+## Development Workflow
 
-工作流文件：`.github/workflows/daily_etf_analysis.yml`
-
-- 定时：工作日 UTC 13:00（北京时间 21:00）
-- 手动触发参数：`force_run`、`symbols`、`market`、`skip_notify`
-- 并发组控制：避免同类任务重入
-- 产物上传：`reports/`、`logs/`
-- 配置探针：只输出“是否配置”，不泄露密钥
-
-## 定时任务说明
-
-- 调度器配置字段：`SCHEDULE_ENABLED`, `SCHEDULE_CRON_CN/HK/US`
-- 当前默认不自动启动（`SCHEDULE_ENABLED=false`）
-- 若需要常驻调度，建议在单独进程中初始化 `EtfScheduler` 并调用 `start()`
-
-## 质量门禁
+### Required quality gates
 
 ```bash
 uv run ruff check src tests scripts
@@ -302,23 +418,70 @@ uv run mypy src
 uv run pytest
 ```
 
-## 当前默认与边界
-
-- 默认数据库：SQLite
-- 默认新闻源：Tavily（其他新闻源接口已预留）
-- V1 不含前端界面，仅提供 FastAPI + JSON 报告接口
-- 部分时间字段仍使用 `datetime.utcnow()`，测试会出现 deprecation warning（不影响运行）
-
-## 运维 Runbook
-
-- Phase 3 运维手册：`docs/operations/phase3-runbook.md`
-- Phase 4 运维手册：`docs/operations/phase4-runbook.md`
-
-## Phase 4 备份与安全脚本
+Frontend checks (run only if `frontend/` exists):
 
 ```bash
-uv run python scripts/backup_db.py --output-dir backups
-uv run python scripts/restore_db.py --backup-file backups/<backup>.db
-uv run python scripts/drill_recovery.py --backup-dir backups
-uv run python scripts/security_scan.py
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run test
+npm --prefix frontend run build
 ```
+
+### Useful local commands
+
+```bash
+python scripts/setup_pre_commit.py
+uv run pytest tests/test_api_v1.py
+uv run pytest tests/test_end_to_end_analysis_flow.py
+```
+
+## CI Workflows
+
+- `.github/workflows/daily_etf_analysis.yml`: scheduled/manual daily analysis
+- `.github/workflows/quality_gate.yml`: lint/type/test checks
+- `.github/workflows/release_guard.yml`: release safety checks and rollback gates
+
+## Troubleshooting
+
+### 1. `No LLM configured`
+
+- Set one of:
+  - `LITELLM_CONFIG`
+  - `LLM_CHANNELS` + `LLM_<CHANNEL>_API_KEY(S)` + `LLM_<CHANNEL>_MODELS`
+  - legacy keys (`OPENAI_*`, `GEMINI_*`, etc.)
+
+### 2. API returns `401/403` on `/api/v1/*`
+
+- Check `API_AUTH_ENABLED`
+- If enabled, send `Authorization: Bearer <API_ADMIN_TOKEN>`
+
+### 3. Empty/weak report quality
+
+- Check provider health: `GET /api/v1/system/provider-health`
+- Verify Tavily keys and `NEWS_MAX_AGE_DAYS`
+- Verify LLM channel/model configuration
+
+### 4. Scheduler does not trigger
+
+- Ensure `SCHEDULE_ENABLED=true`
+- Verify cron expressions use 6 fields (`sec min hour day month weekday`)
+- Confirm market is open and after market close time
+
+### 5. `security_scan.py` reports pip-audit tool error
+
+- Install `pip-audit` in environment if missing, then rerun
+
+## Documentation Map
+
+- [Settings Guide](doc/SETTINGS_GUIDE.md)
+- [SDK Usage](doc/SDK_USAGE.md)
+- [Pre-commit Guide](doc/PRE_COMMIT_GUIDE.md)
+- [Models Guide](doc/MODELS_GUIDE.md)
+- [Architecture report](docs/PROJECT_ARCHITECTURE_LLM_REPORT.md)
+- [Phase 3 runbook](docs/operations/phase3-runbook.md)
+- [Phase 4 runbook](docs/operations/phase4-runbook.md)
+
+## License and Disclaimer
+
+- License: [MIT](LICENSE)
+- Research use only. This project does **not** provide investment advice.
