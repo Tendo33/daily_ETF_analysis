@@ -1,4 +1,4 @@
-# daily_ETF_analysis
+﻿# daily_ETF_analysis
 
 [English README](README.md)
 
@@ -31,7 +31,7 @@
 
 - 多行情源拉取与降级
 - 新闻增强（Tavily）
-- LLM 决策引擎（LiteLLM Router + fallback）
+- LLM 决策引擎（OpenAI-compatible）
 - SQLite 持久化 run/task/report/history
 - FastAPI 对外暴露标准化查询与管理接口
 
@@ -65,7 +65,7 @@ flowchart LR
     B --> C["AnalysisService"]
     C --> D["行情 Provider"]
     C --> E["新闻 Provider (Tavily)"]
-    C --> F["LLM 分析器 (LiteLLM)"]
+    C --> F["LLM 分析器 (OpenAI-compatible)"]
     C --> G["Repository (SQLAlchemy)"]
     G --> H["SQLite"]
     C --> I["报告渲染器"]
@@ -136,10 +136,9 @@ DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
 建议补齐 LLM 与新闻配置获得高质量结果：
 
 ```env
-LLM_CHANNELS=aihubmix
-LLM_AIHUBMIX_BASE_URL=https://aihubmix.com/v1
-LLM_AIHUBMIX_API_KEY=sk-xxxx
-LLM_AIHUBMIX_MODELS=gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-xxxx
+# OPENAI_BASE_URL=https://api.openai.com
 TAVILY_API_KEYS=tvly-xxxx
 ```
 
@@ -230,8 +229,8 @@ uv run python scripts/run_scheduler.py
 - 行情源与容灾参数
   - `REALTIME_SOURCE_PRIORITY`
   - `PROVIDER_MAX_RETRIES`、`PROVIDER_BACKOFF_MS`、`PROVIDER_CIRCUIT_FAIL_THRESHOLD`、`PROVIDER_CIRCUIT_RESET_SECONDS`
-- LLM
-  - 优先级：`LITELLM_CONFIG > LLM_CHANNELS > legacy keys`
+- LLM（仅 OpenAI-compatible）
+  - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
 - 新闻
   - `TAVILY_API_KEYS`、`NEWS_MAX_AGE_DAYS`、`NEWS_PROVIDER_PRIORITY`
 - 通知
@@ -447,9 +446,8 @@ uv run pytest tests/test_end_to_end_analysis_flow.py
 
 配置以下任意一种：
 
-- `LITELLM_CONFIG`
-- `LLM_CHANNELS` + `LLM_<CHANNEL>_API_KEY(S)` + `LLM_<CHANNEL>_MODELS`
-- legacy keys（`OPENAI_*`、`GEMINI_*` 等）
+- `OPENAI_MODEL`
+- `OPENAI_API_KEY` / `OPENAI_API_KEYS`
 
 ### 2. `/api/v1/*` 返回 `401/403`
 
@@ -460,7 +458,7 @@ uv run pytest tests/test_end_to_end_analysis_flow.py
 
 - 查看 Provider 健康：`GET /api/v1/system/provider-health`
 - 检查 Tavily key 与 `NEWS_MAX_AGE_DAYS`
-- 检查 LLM channel/model 配置
+- 检查 OpenAI 模型/密钥配置
 
 ### 4. 定时任务不触发
 

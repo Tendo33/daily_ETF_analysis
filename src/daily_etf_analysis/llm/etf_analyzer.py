@@ -5,17 +5,11 @@ import logging
 import re
 from typing import Any
 
-import litellm
+import httpx
 from json_repair import repair_json
-from litellm import Router
 from pydantic import BaseModel, Field, ValidationError
 
-from daily_etf_analysis.config.settings import (
-    Settings,
-    extra_litellm_params,
-    get_api_keys_for_model,
-    get_settings,
-)
+from daily_etf_analysis.config.settings import Settings, get_settings
 from daily_etf_analysis.domain import (
     Action,
     Confidence,
@@ -66,77 +60,66 @@ Rules:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self.router: Router | None = None
-        self._init_router()
-
-    def _init_router(self) -> None:
-        if not self.settings.llm_model_list:
-            return
-        self.router = Router(
-            model_list=self.settings.llm_model_list,
-            routing_strategy="simple-shuffle",
-            num_retries=2,
-        )
 
     def is_available(self) -> bool:
-        return bool(self.settings.litellm_model or self.settings.llm_model_list)
+        return bool(self.settings.openai_api_keys and self.settings.openai_model)
 
-    def _candidate_models(self) -> list[str]:
-        models = [self.settings.litellm_model] + self.settings.litellm_fallback_models
-        dedup = [m for m in models if m]
-        if not dedup and self.settings.llm_model_list:
-            dedup = list(
-                dict.fromkeys(
-                    item["litellm_params"]["model"]
-                    for item in self.settings.llm_model_list
-                )
-            )
-        return dedup
+    def _resolve_endpoint(self) -> str:
+        base_url = (self.settings.openai_base_url or "").strip()
+        if not base_url:
+            return "https://api.openai.com/v1/chat/completions"
+        base = base_url.rstrip("/")
+        if base.endswith("/v1/chat/completions"):
+            return base
+        if base.endswith("/v1"):
+            return f"{base}/chat/completions"
+        return f"{base}/v1/chat/completions"
 
     def _call_llm(self, prompt: str) -> tuple[str, str]:
-        last_error: Exception | None = None
-        models = self._candidate_models()
-        if not models:
+        if not self.is_available():
             raise RuntimeError("No LLM model configured")
 
-        for model in models:
-            try:
-                kwargs: dict[str, Any] = {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": self.SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": self.settings.llm_temperature,
-                    "max_tokens": self.settings.llm_max_tokens,
-                    "timeout": self.settings.llm_timeout_seconds,
-                }
-                if self.router:
-                    response = self.router.completion(**kwargs)
-                else:
-                    keys = get_api_keys_for_model(model, self.settings)
-                    if keys:
-                        kwargs["api_key"] = keys[0]
-                    kwargs.update(extra_litellm_params(model, self.settings))
-                    response = litellm.completion(**kwargs)
-                choices = getattr(response, "choices", None)
-                if not choices:
-                    raise ValueError("LLM response does not contain choices")
-                first_choice = choices[0]
-                message = getattr(first_choice, "message", None)
-                content = (
-                    getattr(message, "content", None) if message is not None else None
-                )
-                if not isinstance(content, str) or not content.strip():
-                    raise ValueError("Empty LLM response")
-                inc_llm_call("success", model)
-                return content, model
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("LLM call failed with model %s: %s", model, exc)
-                inc_llm_call("failed", model)
-                last_error = exc
-                continue
-        raise RuntimeError(f"All LLM models failed. Last error: {last_error}")
+        model = self.settings.openai_model.strip() or "gpt-4o-mini"
+        if model.startswith("openai/"):
+            model = model.split("/", 1)[1]
+        api_key = self.settings.openai_api_keys[0]
+        endpoint = self._resolve_endpoint()
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": self.settings.llm_temperature,
+            "max_tokens": self.settings.llm_max_tokens,
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        try:
+            response = httpx.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=self.settings.llm_timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+            choices = data.get("choices")
+            if not choices:
+                raise ValueError("LLM response does not contain choices")
+            first_choice = choices[0]
+            message = (
+                first_choice.get("message") if isinstance(first_choice, dict) else None
+            )
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("Empty LLM response")
+            inc_llm_call("success", model)
+            return content, model
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM call failed with model %s: %s", model, exc)
+            inc_llm_call("failed", model)
+            raise RuntimeError(f"LLM call failed. Last error: {exc}") from exc
 
     def _build_prompt(self, context: EtfAnalysisContext) -> str:
         news_text = "\n".join(

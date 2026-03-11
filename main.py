@@ -25,9 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="daily_ETF_analysis entrypoint")
     parser.add_argument("--schedule", action="store_true", help="Enable scheduler")
     parser.add_argument("--serve", action="store_true", help="Run API server")
-    parser.add_argument(
-        "--serve-only", action="store_true", help="Run API server only"
-    )
+    parser.add_argument("--serve-only", action="store_true", help="Run API server only")
     parser.add_argument(
         "--market-review",
         action="store_true",
@@ -43,9 +41,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip trading day guard",
     )
-    parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="API host"
-    )
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="API host")
     parser.add_argument("--port", type=int, default=8000, help="API port")
     return parser.parse_args()
 
@@ -140,6 +136,7 @@ def main() -> int:
 
     scheduler_enabled = args.schedule or settings.schedule_enabled
     if scheduler_enabled:
+
         def scheduled_task(market: str, symbols: list[str]) -> None:
             market_key = market.lower()
             if not args.force_run:
@@ -147,14 +144,17 @@ def main() -> int:
                     market_enum = Market[market_key.upper()]
                 except KeyError:
                     market_enum = None
-                if market_enum in {Market.CN, Market.HK, Market.US}:
-                    if not is_market_open_today(market_enum):
-                        _send_skip_notification(
-                            notifier=notifier,
-                            market=market_key,
-                            reason="Market closed today; analysis skipped.",
-                        )
-                        return
+                if market_enum in {
+                    Market.CN,
+                    Market.HK,
+                    Market.US,
+                } and not is_market_open_today(market_enum):
+                    _send_skip_notification(
+                        notifier=notifier,
+                        market=market_key,
+                        reason="Market closed today; analysis skipped.",
+                    )
+                    return
             run_daily_analysis(
                 service=service,
                 notifier=notifier,
@@ -167,7 +167,9 @@ def main() -> int:
                 poll_interval_seconds=2.0,
             )
 
-        scheduler = EtfScheduler(service=service, settings=settings, on_run=scheduled_task)
+        scheduler = EtfScheduler(
+            service=service, settings=settings, on_run=scheduled_task
+        )
         scheduler.start()
         logger.info("Scheduler started")
 

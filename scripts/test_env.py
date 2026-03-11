@@ -35,14 +35,15 @@ def check_fetch(symbol: str) -> int:
 def check_llm() -> int:
     analyzer = EtfAnalyzer(get_settings())
     if not analyzer.is_available():
-        print("LLM unavailable: configure LITELLM_MODEL / channels first")
+        print("LLM unavailable: configure OPENAI_API_KEY(S) and OPENAI_MODEL")
         return 1
     print("LLM is configured and available.")
     print(
         json.dumps(
             {
-                "litellm_model": get_settings().litellm_model,
-                "fallbacks": get_settings().litellm_fallback_models,
+                "openai_model": get_settings().openai_model,
+                "openai_base_url": get_settings().openai_base_url,
+                "openai_api_keys": len(get_settings().openai_api_keys),
             },
             ensure_ascii=False,
             indent=2,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -47,20 +46,9 @@ class Settings(BaseSettings):
     markets_enabled: CsvList = Field(default_factory=lambda: ["cn", "hk", "us"])
     database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
 
-    litellm_model: str = Field(default="")
-    litellm_fallback_models: CsvList = Field(default_factory=list)
-    litellm_config: str | None = Field(default=None)
-    llm_channels: str = Field(default="")
-    llm_model_list: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
-
-    gemini_api_key: str | None = Field(default=None)
-    gemini_api_keys: CsvList = Field(default_factory=list)
-    anthropic_api_key: str | None = Field(default=None)
-    anthropic_api_keys: CsvList = Field(default_factory=list)
+    openai_model: str = Field(default="gpt-4o-mini")
     openai_api_key: str | None = Field(default=None)
     openai_api_keys: CsvList = Field(default_factory=list)
-    deepseek_api_key: str | None = Field(default=None)
-    deepseek_api_keys: CsvList = Field(default_factory=list)
     openai_base_url: str | None = Field(default=None)
 
     llm_temperature: float = Field(default=0.7)
@@ -173,11 +161,7 @@ class Settings(BaseSettings):
     @field_validator(
         "etf_list",
         "markets_enabled",
-        "litellm_fallback_models",
-        "gemini_api_keys",
-        "anthropic_api_keys",
         "openai_api_keys",
-        "deepseek_api_keys",
         "tavily_api_keys",
         "news_provider_priority",
         "realtime_source_priority",
@@ -285,173 +269,30 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def finalize_settings(self) -> Settings:
         self._normalize_key_lists()
-        self._resolve_llm_model_list()
-        self._infer_models_from_channels()
         return self
 
     def _normalize_key_lists(self) -> None:
-        if not self.gemini_api_keys and self.gemini_api_key:
-            self.gemini_api_keys = [self.gemini_api_key]
-        if not self.anthropic_api_keys and self.anthropic_api_key:
-            self.anthropic_api_keys = [self.anthropic_api_key]
         if not self.openai_api_keys and self.openai_api_key:
             self.openai_api_keys = [self.openai_api_key]
-        if not self.deepseek_api_keys and self.deepseek_api_key:
-            self.deepseek_api_keys = [self.deepseek_api_key]
-
-    def _resolve_llm_model_list(self) -> None:
-        model_list: list[dict[str, Any]] = []
-        if self.litellm_config:
-            model_list = self._parse_litellm_yaml(self.litellm_config)
-        if not model_list and self.llm_channels:
-            channels = self._parse_llm_channels(self.llm_channels)
-            model_list = self._channels_to_model_list(channels)
-        if not model_list:
-            model_list = self._legacy_keys_to_model_list()
-        self.llm_model_list = model_list
-
-    def _infer_models_from_channels(self) -> None:
-        if not self.litellm_model and self.llm_model_list:
-            self.litellm_model = self.llm_model_list[0]["litellm_params"]["model"]
-
-        if not self.litellm_fallback_models and self.llm_model_list:
-            seen = {self.litellm_model}
-            fallbacks: list[str] = []
-            for item in self.llm_model_list:
-                model = item["litellm_params"]["model"]
-                if model not in seen:
-                    seen.add(model)
-                    fallbacks.append(model)
-            self.litellm_fallback_models = fallbacks
-
-    def _parse_litellm_yaml(self, config_path: str) -> list[dict[str, Any]]:
-        try:
-            import yaml
-        except ImportError:
-            return []
-
-        path = Path(config_path)
-        if not path.is_absolute():
-            path = self.get_project_root() / path
-        if not path.exists():
-            return []
-
-        with path.open(encoding="utf-8") as f:
-            content = yaml.safe_load(f) or {}
-        model_list = content.get("model_list", [])
-        if not isinstance(model_list, list):
-            return []
-        for item in model_list:
-            params = item.get("litellm_params", {})
-            for key, value in list(params.items()):
-                if isinstance(value, str) and value.startswith("os.environ/"):
-                    env_name = value.split("/", 1)[1]
-                    params[key] = os.getenv(env_name, "")
-        return model_list
-
-    def _parse_llm_channels(self, channels_raw: str) -> list[dict[str, Any]]:
-        channels: list[dict[str, Any]] = []
-        for channel_name in _parse_csv(channels_raw):
-            upper = channel_name.upper()
-            base_url = os.getenv(f"LLM_{upper}_BASE_URL", "").strip() or None
-
-            keys = _parse_csv(os.getenv(f"LLM_{upper}_API_KEYS", ""))
-            if not keys:
-                single_key = os.getenv(f"LLM_{upper}_API_KEY", "").strip()
-                if single_key:
-                    keys = [single_key]
-
-            models = _parse_csv(os.getenv(f"LLM_{upper}_MODELS", ""))
-            if base_url:
-                models = [f"openai/{m}" if "/" not in m else m for m in models]
-
-            if not keys or not models:
-                continue
-
-            channels.append(
-                {
-                    "name": channel_name.lower(),
-                    "base_url": base_url,
-                    "api_keys": keys,
-                    "models": models,
-                }
-            )
-        return channels
-
-    def _channels_to_model_list(
-        self, channels: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        model_list: list[dict[str, Any]] = []
-        for channel in channels:
-            for model_name in channel["models"]:
-                for api_key in channel["api_keys"]:
-                    params: dict[str, Any] = {"model": model_name, "api_key": api_key}
-                    if channel["base_url"]:
-                        params["api_base"] = channel["base_url"]
-                    model_list.append(
-                        {"model_name": model_name, "litellm_params": params}
-                    )
-        return model_list
-
-    def _legacy_keys_to_model_list(self) -> list[dict[str, Any]]:
-        model_list: list[dict[str, Any]] = []
-        for key in self.gemini_api_keys:
-            model_list.append(
-                {
-                    "model_name": "__legacy_gemini__",
-                    "litellm_params": {
-                        "model": "gemini/gemini-2.0-flash",
-                        "api_key": key,
-                    },
-                }
-            )
-        for key in self.anthropic_api_keys:
-            model_list.append(
-                {
-                    "model_name": "__legacy_anthropic__",
-                    "litellm_params": {
-                        "model": "anthropic/claude-3-5-sonnet-20241022",
-                        "api_key": key,
-                    },
-                }
-            )
-        for key in self.openai_api_keys:
-            params: dict[str, Any] = {"model": "openai/gpt-4o-mini", "api_key": key}
-            if self.openai_base_url:
-                params["api_base"] = self.openai_base_url
-            model_list.append(
-                {"model_name": "__legacy_openai__", "litellm_params": params}
-            )
-        for key in self.deepseek_api_keys:
-            model_list.append(
-                {
-                    "model_name": "__legacy_deepseek__",
-                    "litellm_params": {
-                        "model": "deepseek/deepseek-chat",
-                        "api_key": key,
-                    },
-                }
-            )
-        return model_list
 
     def validate_structured(self) -> list[ConfigIssue]:
         issues: list[ConfigIssue] = []
         if not self.etf_list:
             issues.append(ConfigIssue("error", "ETF_LIST is empty.", "ETF_LIST"))
-        if not self.llm_model_list:
+        if not self.openai_api_keys:
             issues.append(
                 ConfigIssue(
                     "error",
-                    "No LLM configured. Set LITELLM_CONFIG, LLM_CHANNELS, or API keys.",
-                    "LITELLM_CONFIG",
+                    "No LLM configured. Set OPENAI_API_KEY(S).",
+                    "OPENAI_API_KEY",
                 )
             )
-        if not self.litellm_model:
+        if not self.openai_model:
             issues.append(
                 ConfigIssue(
                     "warning",
-                    "LITELLM_MODEL is empty. First model from channels/legacy will be used.",
-                    "LITELLM_MODEL",
+                    "OPENAI_MODEL is empty. Default model will be used.",
+                    "OPENAI_MODEL",
                 )
             )
         if not self.tavily_api_keys:
@@ -492,22 +333,3 @@ def reload_settings(env_file: Path | None = None) -> Settings:
     if env_file is None:
         return get_settings()
     return Settings(_env_file=str(env_file))  # type: ignore[call-arg]
-
-
-def get_api_keys_for_model(model: str, settings: Settings) -> list[str]:
-    if model.startswith("gemini/") or model.startswith("vertex_ai/"):
-        return settings.gemini_api_keys
-    if model.startswith("anthropic/"):
-        return settings.anthropic_api_keys
-    if model.startswith("deepseek/"):
-        return settings.deepseek_api_keys
-    if model.startswith("openai/") or "/" not in model:
-        return settings.openai_api_keys
-    return []
-
-
-def extra_litellm_params(model: str, settings: Settings) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-    if model.startswith("openai/") and settings.openai_base_url:
-        params["api_base"] = settings.openai_base_url
-    return params

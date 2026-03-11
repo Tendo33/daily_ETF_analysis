@@ -1,4 +1,4 @@
-# daily_ETF_analysis
+﻿# daily_ETF_analysis
 
 [中文文档](README_CN.md)
 
@@ -31,7 +31,7 @@ This service analyzes a configurable ETF universe using:
 
 - Multi-source market data providers with resilience controls
 - News enrichment (Tavily)
-- LLM-based decision generation with fallback/degradation logic
+- LLM-based decision generation (OpenAI-compatible only)
 - Persistent run/task/report history via SQLite + SQLAlchemy + Alembic
 
 Symbol format is unified as `<MARKET>:<CODE>`, for example:
@@ -65,7 +65,7 @@ flowchart LR
     B --> C["AnalysisService"]
     C --> D["Market Data Providers"]
     C --> E["News Provider (Tavily)"]
-    C --> F["LLM Analyzer (LiteLLM)"]
+    C --> F["LLM Analyzer (OpenAI-compatible)"]
     C --> G["Repository (SQLAlchemy)"]
     G --> H["SQLite"]
     C --> I["Report Renderer"]
@@ -89,7 +89,7 @@ src/daily_etf_analysis/
 ├── config/             # Pydantic settings and validation
 ├── core/               # Trading calendar and time utilities
 ├── domain/             # ETF domain models and symbol rules
-├── llm/                # ETF decision engine (LiteLLM)
+├── llm/                # ETF decision engine (OpenAI-compatible)
 ├── notifications/      # Feishu/WeChat/Telegram/Email + markdown image
 ├── observability/      # metrics and logging
 ├── pipelines/          # Daily workflow pipeline
@@ -136,10 +136,9 @@ DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
 For full-quality output (recommended), configure LLM + news:
 
 ```env
-LLM_CHANNELS=aihubmix
-LLM_AIHUBMIX_BASE_URL=https://aihubmix.com/v1
-LLM_AIHUBMIX_API_KEY=sk-xxxx
-LLM_AIHUBMIX_MODELS=gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-xxxx
+# OPENAI_BASE_URL=https://api.openai.com
 TAVILY_API_KEYS=tvly-xxxx
 ```
 
@@ -230,8 +229,8 @@ All config is loaded via `pydantic-settings` from:
 - Data source priority and resilience
   - `REALTIME_SOURCE_PRIORITY`
   - `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_MS`, `PROVIDER_CIRCUIT_FAIL_THRESHOLD`, `PROVIDER_CIRCUIT_RESET_SECONDS`
-- LLM
-  - priority: `LITELLM_CONFIG > LLM_CHANNELS > legacy keys`
+- LLM (OpenAI-compatible only)
+  - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
 - News
   - `TAVILY_API_KEYS`, `NEWS_MAX_AGE_DAYS`, `NEWS_PROVIDER_PRIORITY`
 - Notifications
@@ -446,9 +445,8 @@ uv run pytest tests/test_end_to_end_analysis_flow.py
 ### 1. `No LLM configured`
 
 - Set one of:
-  - `LITELLM_CONFIG`
-  - `LLM_CHANNELS` + `LLM_<CHANNEL>_API_KEY(S)` + `LLM_<CHANNEL>_MODELS`
-  - legacy keys (`OPENAI_*`, `GEMINI_*`, etc.)
+  - `OPENAI_MODEL`
+  - `OPENAI_API_KEY` / `OPENAI_API_KEYS`
 
 ### 2. API returns `401/403` on `/api/v1/*`
 
@@ -459,7 +457,7 @@ uv run pytest tests/test_end_to_end_analysis_flow.py
 
 - Check provider health: `GET /api/v1/system/provider-health`
 - Verify Tavily keys and `NEWS_MAX_AGE_DAYS`
-- Verify LLM channel/model configuration
+- Verify OpenAI model/key configuration
 
 ### 4. Scheduler does not trigger
 
