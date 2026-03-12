@@ -11,6 +11,7 @@ from daily_etf_analysis.providers.market_data import DataFetcherManager
 def check_config() -> int:
     settings = get_settings()
     issues = settings.validate_structured()
+    print(settings.model_dump_json(indent=2))
     if not issues:
         print("Config check: OK")
         return 0
