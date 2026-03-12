@@ -67,7 +67,10 @@ def main() -> int:
         )
 
     scheduler = EtfScheduler(service=service, settings=settings, on_run=scheduled_task)
-    scheduler.start()
+    started = scheduler.start()
+    if not started:
+        logger.warning("Scheduler not started.")
+        return 1
 
     logger.info("Scheduler started. Press Ctrl+C to stop.")
     try:

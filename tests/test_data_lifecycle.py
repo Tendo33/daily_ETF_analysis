@@ -14,7 +14,7 @@ from daily_etf_analysis.domain import (
     Trend,
 )
 from daily_etf_analysis.repositories import EtfRepository
-from daily_etf_analysis.repositories.repository import EtfAnalysisReportORM
+from daily_etf_analysis.repositories.models import EtfAnalysisReportORM
 from daily_etf_analysis.services.data_lifecycle_service import DataLifecycleService
 
 

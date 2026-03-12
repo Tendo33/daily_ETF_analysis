@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from daily_etf_analysis.api.runtime import AppRuntime
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.repositories.repository import EtfRepository
-from daily_etf_analysis.services.analysis_service import AnalysisService
 from daily_etf_analysis.services.system_config_service import SystemConfigService
 
 
@@ -63,11 +63,13 @@ def test_system_config_updates_are_composable_even_with_stale_runtime_settings(
     assert second["config"]["news_max_age_days"] == 9
 
 
-def test_analysis_service_applies_updated_settings_immediately(
+def test_runtime_applies_updated_settings_and_swaps_service(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
     settings = _build_settings(tmp_path / "analysis.db")
-    service = AnalysisService(settings=settings)
+    runtime = AppRuntime(settings=settings)
+    service = runtime.get_service()
+
     monkeypatch.setattr(
         "daily_etf_analysis.services.system_config_service.reload_settings",
         lambda: settings,
@@ -80,18 +82,18 @@ def test_analysis_service_applies_updated_settings_immediately(
     )
 
     assert payload["config"]["etf_list"] == ["CN:159659"]
-    assert service.settings.etf_list == ["CN:159659"]
-    assert service.pipeline.settings.etf_list == ["CN:159659"]
-    assert service.system_config_service.settings.etf_list == ["CN:159659"]
-    assert service.task_manager.pipeline.settings.etf_list == ["CN:159659"]
-    service.shutdown()
+    new_service = runtime.get_service()
+    assert new_service is not service
+    assert new_service.settings.etf_list == ["CN:159659"]
+    runtime.shutdown()
 
 
-def test_analysis_service_replaces_and_shuts_down_old_task_manager(
+def test_runtime_shuts_down_old_task_manager_on_reload(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
     settings = _build_settings(tmp_path / "analysis-reload.db")
-    service = AnalysisService(settings=settings)
+    runtime = AppRuntime(settings=settings)
+    service = runtime.get_service()
     old_manager = service.task_manager
     shutdown_calls = {"count": 0}
     original_shutdown = old_manager.shutdown
@@ -113,5 +115,5 @@ def test_analysis_service_replaces_and_shuts_down_old_task_manager(
     )
 
     assert shutdown_calls["count"] == 1
-    assert service.task_manager is not old_manager
-    service.shutdown()
+    assert runtime.get_service().task_manager is not old_manager
+    runtime.shutdown()

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus
 from daily_etf_analysis.repositories import EtfRepository
-from daily_etf_analysis.repositories.repository import AnalysisTaskORM
+from daily_etf_analysis.repositories.models import AnalysisTaskORM
 from daily_etf_analysis.services.task_manager import TaskManager
 
 

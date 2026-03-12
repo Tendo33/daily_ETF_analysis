@@ -129,7 +129,7 @@ def test_task_queue_executes_pending_tasks(tmp_path) -> None:  # type: ignore[no
     settings = Settings(
         database_url=f"sqlite:///{db_path}",
         task_max_concurrency=1,
-        task_queue_max_size=1,
+        task_queue_max_size=3,
         task_timeout_seconds=30,
         task_dedup_window_seconds=0,
     )
@@ -322,6 +322,27 @@ def test_timeout_keeps_symbol_dedup_active_until_worker_stops(
 
     with pytest.raises(ValueError, match="dedup"):
         manager.submit(["CN:159659"])
+
+    pipeline.release()
+    manager.shutdown()
+
+
+def test_queue_limit_rejects_when_active_over_limit(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "task_queue_limit.db"
+    settings = Settings(
+        database_url=f"sqlite:///{db_path}",
+        task_max_concurrency=1,
+        task_queue_max_size=1,
+        task_timeout_seconds=30,
+        task_dedup_window_seconds=0,
+    )
+    repo = EtfRepository(settings)
+    pipeline = _BlockingPipeline()
+    manager = TaskManager(repository=repo, pipeline=pipeline, settings=settings)  # type: ignore[arg-type]
+
+    _ = manager.submit(["CN:159659"])
+    with pytest.raises(ValueError, match="queue"):
+        manager.submit(["US:QQQ"])
 
     pipeline.release()
     manager.shutdown()

@@ -31,15 +31,16 @@ class EtfScheduler:
         self._last_run_marker: set[str] = set()
         self._last_next_run_log_marker: str | None = None
 
-    def start(self) -> None:
-        if not self.settings.schedule_enabled:
-            return
+    def start(self, force_enable: bool = False) -> bool:
+        if not self.settings.schedule_enabled and not force_enable:
+            return False
         if self._thread is not None and self._thread.is_alive():
-            return
+            return False
         self._thread = threading.Thread(
             target=self._loop, daemon=True, name="etf-scheduler"
         )
         self._thread.start()
+        return True
 
     def stop(self) -> None:
         self._stop_event.set()

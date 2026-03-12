@@ -140,6 +140,7 @@ OPENAI_MODEL=gpt-4o-mini
 OPENAI_API_KEY=sk-xxxx
 # OPENAI_BASE_URL=https://api.openai.com
 TAVILY_API_KEYS=tvly-xxxx
+# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
 ```
 
 ### 5. Start API server
@@ -232,7 +233,7 @@ All config is loaded via `pydantic-settings` from:
 - LLM (OpenAI-compatible only)
   - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
 - News
-  - `TAVILY_API_KEYS`, `NEWS_MAX_AGE_DAYS`, `NEWS_PROVIDER_PRIORITY`
+  - `TAVILY_API_KEYS`, `TAVILY_BASE_URL`, `NEWS_MAX_AGE_DAYS`, `NEWS_PROVIDER_PRIORITY`
 - Notifications
   - `NOTIFY_CHANNELS`, `FEISHU_WEBHOOK_URL`, `WECHAT_WEBHOOK_URL`, `TELEGRAM_*`, `EMAIL_*`
 - Runtime and reliability

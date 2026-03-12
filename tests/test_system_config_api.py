@@ -4,7 +4,6 @@ import importlib
 
 from fastapi.testclient import TestClient
 
-from daily_etf_analysis.api.app import app
 from daily_etf_analysis.config.settings import Settings
 
 
@@ -60,9 +59,22 @@ class _ServiceWithSystemConfig:
         )
 
 
+class _FakeRuntime:
+    def __init__(self, service) -> None:  # type: ignore[no-untyped-def]
+        self._service = service
+        self.closed = False
+
+    def get_service(self):  # type: ignore[no-untyped-def]
+        return self._service
+
+    def shutdown(self) -> None:
+        self.closed = True
+
+
 def test_system_config_api(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
-    monkeypatch.setattr(router_module, "_service", lambda: _ServiceWithSystemConfig())
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
+    runtime = _FakeRuntime(_ServiceWithSystemConfig())
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
 
     auth_module = importlib.import_module("daily_etf_analysis.api.auth")
     monkeypatch.setattr(
@@ -71,40 +83,40 @@ def test_system_config_api(monkeypatch) -> None:  # type: ignore[no-untyped-def]
         lambda: Settings(api_auth_enabled=False),
     )
 
-    client = TestClient(app)
+    with TestClient(app_module.app) as client:
+        get_resp = client.get("/api/v1/system/config")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["version"] == 1
 
-    get_resp = client.get("/api/v1/system/config")
-    assert get_resp.status_code == 200
-    assert get_resp.json()["version"] == 1
+        validate_resp = client.post(
+            "/api/v1/system/config/validate",
+            json={"updates": {"etf_list": ["US:QQQ"]}},
+        )
+        assert validate_resp.status_code == 200
+        assert validate_resp.json()["valid"] is True
 
-    validate_resp = client.post(
-        "/api/v1/system/config/validate",
-        json={"updates": {"etf_list": ["US:QQQ"]}},
-    )
-    assert validate_resp.status_code == 200
-    assert validate_resp.json()["valid"] is True
+        update_resp = client.put(
+            "/api/v1/system/config",
+            json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["version"] == 2
 
-    update_resp = client.put(
-        "/api/v1/system/config",
-        json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
-    )
-    assert update_resp.status_code == 200
-    assert update_resp.json()["version"] == 2
+        schema_resp = client.get("/api/v1/system/config/schema")
+        assert schema_resp.status_code == 200
+        assert "fields" in schema_resp.json()
 
-    schema_resp = client.get("/api/v1/system/config/schema")
-    assert schema_resp.status_code == 200
-    assert "fields" in schema_resp.json()
-
-    audit_resp = client.get("/api/v1/system/config/audit?page=1&limit=20")
-    assert audit_resp.status_code == 200
-    assert audit_resp.json()[0]["actor"] == "admin"
+        audit_resp = client.get("/api/v1/system/config/audit?page=1&limit=20")
+        assert audit_resp.status_code == 200
+        assert audit_resp.json()[0]["actor"] == "admin"
 
 
 def test_system_config_update_requires_admin_token_when_auth_enabled(
     monkeypatch,
 ) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
-    monkeypatch.setattr(router_module, "_service", lambda: _ServiceWithSystemConfig())
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
+    runtime = _FakeRuntime(_ServiceWithSystemConfig())
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
 
     auth_module = importlib.import_module("daily_etf_analysis.api.auth")
     monkeypatch.setattr(
@@ -113,32 +125,32 @@ def test_system_config_update_requires_admin_token_when_auth_enabled(
         lambda: Settings(api_auth_enabled=True, api_admin_token="secret-token"),
     )
 
-    client = TestClient(app)
+    with TestClient(app_module.app) as client:
+        no_token = client.put(
+            "/api/v1/system/config",
+            json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
+        )
+        assert no_token.status_code == 401
 
-    no_token = client.put(
-        "/api/v1/system/config",
-        json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
-    )
-    assert no_token.status_code == 401
+        wrong = client.put(
+            "/api/v1/system/config",
+            json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
+            headers={"Authorization": "Bearer wrong"},
+        )
+        assert wrong.status_code == 403
 
-    wrong = client.put(
-        "/api/v1/system/config",
-        json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
-        headers={"Authorization": "Bearer wrong"},
-    )
-    assert wrong.status_code == 403
-
-    ok = client.put(
-        "/api/v1/system/config",
-        json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
-        headers={"Authorization": "Bearer secret-token"},
-    )
-    assert ok.status_code == 200
+        ok = client.put(
+            "/api/v1/system/config",
+            json={"expected_version": 1, "updates": {"etf_list": ["US:QQQ"]}},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert ok.status_code == 200
 
 
 def test_system_config_version_conflict_returns_409(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
-    monkeypatch.setattr(router_module, "_service", lambda: _ServiceWithSystemConfig())
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
+    runtime = _FakeRuntime(_ServiceWithSystemConfig())
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
 
     auth_module = importlib.import_module("daily_etf_analysis.api.auth")
     monkeypatch.setattr(
@@ -147,10 +159,9 @@ def test_system_config_version_conflict_returns_409(monkeypatch) -> None:  # typ
         lambda: Settings(api_auth_enabled=False),
     )
 
-    client = TestClient(app)
-
-    conflict = client.put(
-        "/api/v1/system/config",
-        json={"expected_version": 0, "updates": {"etf_list": ["US:QQQ"]}},
-    )
-    assert conflict.status_code == 409
+    with TestClient(app_module.app) as client:
+        conflict = client.put(
+            "/api/v1/system/config",
+            json={"expected_version": 0, "updates": {"etf_list": ["US:QQQ"]}},
+        )
+        assert conflict.status_code == 409

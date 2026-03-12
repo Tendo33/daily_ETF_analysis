@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
-from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from daily_etf_analysis.api.auth import require_admin_token
+from daily_etf_analysis.api.runtime import AppRuntime
 from daily_etf_analysis.api.v1.schemas import (
     AnalysisRunCreateRequest,
     AnalysisRunCreateResponse,
@@ -36,9 +36,15 @@ from daily_etf_analysis.services import AnalysisService
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin_token)])
 
 
-@lru_cache
-def _service() -> AnalysisService:
-    return AnalysisService()
+def _get_service(request: Request) -> AnalysisService:
+    runtime = getattr(request.app.state, "runtime", None)
+    if runtime is None:
+        runtime = AppRuntime()
+        request.app.state.runtime = runtime
+    return runtime.get_service()
+
+
+ServiceDep = Annotated[AnalysisService, Depends(_get_service)]
 
 
 @router.post(
@@ -47,9 +53,10 @@ def _service() -> AnalysisService:
 def create_run(
     request: AnalysisRunCreateRequest,
     http_request: Request,
+    service: ServiceDep,
 ) -> AnalysisRunCreateResponse:
     try:
-        run = _service().create_analysis_run(
+        run = service.create_analysis_run(
             symbols=request.symbols,
             markets=request.markets,
             force_refresh=request.force_refresh,
@@ -72,8 +79,34 @@ def create_run(
 
 
 @router.get("/analysis/runs/{run_id}", response_model=AnalysisRunDetailResponse)
-def get_run(run_id: str, http_request: Request) -> AnalysisRunDetailResponse:
-    payload = _service().build_run_contract(run_id)
+def get_run(
+    run_id: str,
+    http_request: Request,
+    service: ServiceDep,
+) -> AnalysisRunDetailResponse:
+    payload = service.build_run_contract(run_id)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=_error_detail(
+                code="RUN_NOT_FOUND",
+                message="Analysis run not found.",
+                request=http_request,
+                details={"run_id": run_id},
+            ),
+        )
+    return AnalysisRunDetailResponse.model_validate(payload)
+
+
+@router.post(
+    "/analysis/runs/{run_id}/refresh", response_model=AnalysisRunDetailResponse
+)
+def refresh_run(
+    run_id: str,
+    http_request: Request,
+    service: ServiceDep,
+) -> AnalysisRunDetailResponse:
+    payload = service.refresh_analysis_run(run_id)
     if payload is None:
         raise HTTPException(
             status_code=404,
@@ -90,6 +123,7 @@ def get_run(run_id: str, http_request: Request) -> AnalysisRunDetailResponse:
 @router.get("/reports/daily", response_model=DailyReportResponse)
 def get_daily_report(
     http_request: Request,
+    service: ServiceDep,
     date_str: str = Query(alias="date"),
     market: str = Query(default="all"),
     run_id: str | None = Query(default=None),
@@ -105,7 +139,7 @@ def get_daily_report(
                 request=http_request,
             ),
         ) from exc
-    payload = _service().get_daily_report_contract(
+    payload = service.get_daily_report_contract(
         target_date=target_date,
         market=market,
         run_id=run_id,
@@ -116,6 +150,7 @@ def get_daily_report(
 @router.get("/history/signals", response_model=HistorySignalsResponse)
 def list_history_signals(
     http_request: Request,
+    service: ServiceDep,
     symbol: str | None = Query(default=None),
     run_id: str | None = Query(default=None),
     date_from: Annotated[date | None, Query()] = None,
@@ -123,7 +158,7 @@ def list_history_signals(
     limit: int = Query(default=200, ge=1, le=2000),
 ) -> HistorySignalsResponse:
     try:
-        rows = _service().list_history_signals(
+        rows = service.list_history_signals(
             symbol=symbol,
             run_id=run_id,
             date_from=date_from,
@@ -147,9 +182,10 @@ def list_history_signals(
 def run_backtest(
     request: BacktestRunRequest,
     http_request: Request,
+    service: ServiceDep,
 ) -> BacktestRunResponse:
     try:
-        payload = _service().run_backtest(
+        payload = service.run_backtest(
             symbols=request.symbols,
             eval_window_days=request.eval_window_days,
         )
@@ -169,9 +205,10 @@ def run_backtest(
 @router.get("/backtest/results", response_model=list[BacktestResultRowResponse])
 def get_backtest_results(
     http_request: Request,
+    service: ServiceDep,
     run_id: str = Query(min_length=1),
 ) -> list[BacktestResultRowResponse]:
-    rows = _service().get_backtest_results(run_id)
+    rows = service.get_backtest_results(run_id)
     if rows is None:
         raise HTTPException(
             status_code=404,
@@ -188,9 +225,10 @@ def get_backtest_results(
 @router.get("/backtest/performance", response_model=BacktestPerformanceResponse)
 def get_backtest_performance(
     http_request: Request,
+    service: ServiceDep,
     run_id: str = Query(min_length=1),
 ) -> BacktestPerformanceResponse:
-    run = _service().get_backtest_performance(run_id)
+    run = service.get_backtest_performance(run_id)
     if run is None:
         raise HTTPException(
             status_code=404,
@@ -217,10 +255,11 @@ def get_backtest_performance(
 def get_backtest_symbol_performance(
     http_request: Request,
     symbol: str,
+    service: ServiceDep,
     run_id: str = Query(min_length=1),
 ) -> BacktestResultRowResponse:
     try:
-        row = _service().get_backtest_symbol_performance(run_id=run_id, symbol=symbol)
+        row = service.get_backtest_symbol_performance(run_id=run_id, symbol=symbol)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -245,8 +284,10 @@ def get_backtest_symbol_performance(
 
 
 @router.get("/etfs")
-def list_etfs() -> list[dict[str, object]]:
-    items = _service().list_etfs()
+def list_etfs(
+    service: ServiceDep,
+) -> list[dict[str, object]]:
+    items = service.list_etfs()
     return [
         {
             "symbol": i.symbol,
@@ -266,9 +307,10 @@ def list_etfs() -> list[dict[str, object]]:
 def replace_etfs(
     request: ReplaceEtfsRequest,
     http_request: Request,
+    service: ServiceDep,
 ) -> list[dict[str, object]]:
     try:
-        items = _service().replace_etfs(request.symbols)
+        items = service.replace_etfs(request.symbols)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -295,17 +337,20 @@ def replace_etfs(
 
 
 @router.get("/index-mappings")
-def get_index_mappings() -> dict[str, list[str]]:
-    return _service().get_index_mappings()
+def get_index_mappings(
+    service: ServiceDep,
+) -> dict[str, list[str]]:
+    return service.get_index_mappings()
 
 
 @router.put("/index-mappings")
 def replace_index_mappings(
     request: ReplaceIndexMappingsRequest,
     http_request: Request,
+    service: ServiceDep,
 ) -> dict[str, list[str]]:
     try:
-        return _service().replace_index_mappings(request.mappings)
+        return service.replace_index_mappings(request.mappings)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -322,9 +367,10 @@ def replace_index_mappings(
 def get_quote(
     symbol: str,
     http_request: Request,
+    service: ServiceDep,
 ) -> dict[str, str | float | None]:
     try:
-        return _service().get_quote(normalize_symbol(symbol))
+        return service.get_quote(normalize_symbol(symbol))
     except ValueError as exc:
         detail = str(exc).lower()
         if "valid market" in detail or "unable to infer market" in detail:
@@ -351,10 +397,11 @@ def get_quote(
 def get_history(
     http_request: Request,
     symbol: str,
+    service: ServiceDep,
     days: int = Query(default=120, ge=1, le=3650),
 ) -> list[dict[str, str | float | None]]:
     try:
-        return _service().get_history(normalize_symbol(symbol), days=days)
+        return service.get_history(normalize_symbol(symbol), days=days)
     except ValueError as exc:
         detail = str(exc).lower()
         if "valid market" in detail or "unable to infer market" in detail:
@@ -381,10 +428,11 @@ def get_history(
 def get_index_comparisons(
     http_request: Request,
     index_symbol: Annotated[str, Query(min_length=1)],
+    service: ServiceDep,
     target_date: Annotated[date | None, Query(alias="date")] = None,
 ) -> IndexComparisonResponse:
     try:
-        result = _service().get_index_comparison(
+        result = service.get_index_comparison(
             index_symbol=index_symbol,
             target_date=target_date,
         )
@@ -422,22 +470,27 @@ def get_index_comparisons(
 
 
 @router.get("/system/provider-health", response_model=list[ProviderHealthResponse])
-def get_provider_health() -> list[ProviderHealthResponse]:
-    items = _service().get_provider_health()
+def get_provider_health(
+    service: ServiceDep,
+) -> list[ProviderHealthResponse]:
+    items = service.get_provider_health()
     return [ProviderHealthResponse.model_validate(item) for item in items]
 
 
 @router.get("/system/config", response_model=SystemConfigResponse)
-def get_system_config() -> SystemConfigResponse:
-    payload = _service().get_system_config()
+def get_system_config(
+    service: ServiceDep,
+) -> SystemConfigResponse:
+    payload = service.get_system_config()
     return SystemConfigResponse.model_validate(payload)
 
 
 @router.post("/system/config/validate", response_model=SystemConfigValidateResponse)
 def validate_system_config(
     request: SystemConfigValidateRequest,
+    service: ServiceDep,
 ) -> SystemConfigValidateResponse:
-    payload = _service().validate_system_config(request.updates)
+    payload = service.validate_system_config(request.updates)
     return SystemConfigValidateResponse.model_validate(payload)
 
 
@@ -445,9 +498,10 @@ def validate_system_config(
 def update_system_config(
     request: SystemConfigUpdateRequest,
     http_request: Request,
+    service: ServiceDep,
 ) -> SystemConfigResponse:
     try:
-        payload = _service().update_system_config(
+        payload = service.update_system_config(
             expected_version=request.expected_version,
             updates=request.updates,
             actor="admin",
@@ -476,38 +530,30 @@ def update_system_config(
 
 
 @router.get("/system/config/schema", response_model=SystemConfigSchemaResponse)
-def get_system_config_schema() -> SystemConfigSchemaResponse:
-    payload = _service().get_system_config_schema()
+def get_system_config_schema(
+    service: ServiceDep,
+) -> SystemConfigSchemaResponse:
+    payload = service.get_system_config_schema()
     return SystemConfigSchemaResponse.model_validate(payload)
 
 
 @router.get("/system/config/audit", response_model=list[SystemConfigAuditItemResponse])
 def list_system_config_audit(
+    service: ServiceDep,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=200),
 ) -> list[SystemConfigAuditItemResponse]:
-    rows = _service().list_system_config_audit(page=page, limit=limit)
+    rows = service.list_system_config_audit(page=page, limit=limit)
     return [SystemConfigAuditItemResponse.model_validate(row) for row in rows]
 
 
 @router.post("/system/lifecycle/cleanup", response_model=LifecycleCleanupResponse)
 def run_lifecycle_cleanup(
+    service: ServiceDep,
     dry_run: bool = Query(default=True),
 ) -> LifecycleCleanupResponse:
-    payload = _service().cleanup_data_lifecycle(dry_run=dry_run, actor="admin")
+    payload = service.cleanup_data_lifecycle(dry_run=dry_run, actor="admin")
     return LifecycleCleanupResponse.model_validate(payload)
-
-
-def shutdown_service() -> None:
-    cache_info = getattr(_service, "cache_info", None)
-    if not callable(cache_info):
-        return
-    if cache_info().currsize == 0:
-        return
-    _service().shutdown()
-    cache_clear = getattr(_service, "cache_clear", None)
-    if callable(cache_clear):
-        cache_clear()
 
 
 def _to_float(value: object) -> float | None:

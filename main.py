@@ -134,8 +134,12 @@ def main() -> int:
         )
         return 0
 
-    scheduler_enabled = args.schedule or settings.schedule_enabled
-    if scheduler_enabled:
+    scheduler_requested = args.schedule or settings.schedule_enabled
+    if scheduler_requested:
+        if args.schedule and not settings.schedule_enabled:
+            logger.warning(
+                "Scheduler forced on via --schedule (SCHEDULE_ENABLED=false)."
+            )
 
         def scheduled_task(market: str, symbols: list[str]) -> None:
             market_key = market.lower()
@@ -170,11 +174,12 @@ def main() -> int:
         scheduler = EtfScheduler(
             service=service, settings=settings, on_run=scheduled_task
         )
-        scheduler.start()
-        logger.info("Scheduler started")
+        started = scheduler.start(force_enable=bool(args.schedule))
+        if started:
+            logger.info("Scheduler started")
 
     if args.serve or args.serve_only:
-        if scheduler_enabled:
+        if scheduler_requested:
             api_thread = threading.Thread(
                 target=_start_api,
                 kwargs={"host": args.host, "port": args.port},
@@ -186,7 +191,7 @@ def main() -> int:
             _start_api(args.host, args.port)
             return 0
 
-    if scheduler_enabled:
+    if scheduler_requested:
         try:
             while True:
                 time.sleep(1)

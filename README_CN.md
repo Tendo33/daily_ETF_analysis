@@ -140,6 +140,7 @@ OPENAI_MODEL=gpt-4o-mini
 OPENAI_API_KEY=sk-xxxx
 # OPENAI_BASE_URL=https://api.openai.com
 TAVILY_API_KEYS=tvly-xxxx
+# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
 ```
 
 ### 5. 启动 API
@@ -232,7 +233,7 @@ uv run python scripts/run_scheduler.py
 - LLM（仅 OpenAI-compatible）
   - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
 - 新闻
-  - `TAVILY_API_KEYS`、`NEWS_MAX_AGE_DAYS`、`NEWS_PROVIDER_PRIORITY`
+  - `TAVILY_API_KEYS`、`TAVILY_BASE_URL`、`NEWS_MAX_AGE_DAYS`、`NEWS_PROVIDER_PRIORITY`
 - 通知
   - `NOTIFY_CHANNELS`、`FEISHU_WEBHOOK_URL`、`WECHAT_WEBHOOK_URL`、`TELEGRAM_*`、`EMAIL_*`
 - 运行可靠性

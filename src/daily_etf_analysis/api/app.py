@@ -1,22 +1,39 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from daily_etf_analysis.api.runtime import AppRuntime
 from daily_etf_analysis.api.v1.router import router as v1_router
-from daily_etf_analysis.api.v1.router import shutdown_service
 from daily_etf_analysis.config.settings import get_settings
 from daily_etf_analysis.observability import inc_api_request, render_metrics_text
 
 logger = logging.getLogger(__name__)
 
+
+def _runtime_provider() -> AppRuntime:
+    return AppRuntime()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+    runtime = _runtime_provider()
+    app.state.runtime = runtime
+    try:
+        yield
+    finally:
+        runtime.shutdown()
+
+
 app = FastAPI(
     title="daily_ETF_analysis API",
     version="0.1.0",
     description="ETF intelligent analysis service for CN/HK/US markets.",
+    lifespan=lifespan,
 )
 
 
@@ -72,8 +89,3 @@ async def unhandled_exception_handler(  # type: ignore[no-untyped-def]
             }
         },
     )
-
-
-@app.on_event("shutdown")
-def shutdown_resources() -> None:
-    shutdown_service()

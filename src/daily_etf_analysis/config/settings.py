@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = Field(default=60)
 
     tavily_api_keys: CsvList = Field(default_factory=list)
+    tavily_base_url: str | None = Field(default=None)
     news_max_age_days: int = Field(default=3)
     news_provider_priority: CsvList = Field(default_factory=lambda: ["tavily"])
 
@@ -157,6 +158,14 @@ class Settings(BaseSettings):
         if val not in allowed:
             raise ValueError(f"md2img_engine must be one of {sorted(allowed)}")
         return val
+
+    @field_validator("tavily_base_url")
+    @classmethod
+    def normalize_tavily_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
 
     @field_validator(
         "etf_list",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -117,3 +118,28 @@ def test_get_task_report_date_returns_latest_trade_date(tmp_path: Path) -> None:
 def test_get_task_report_date_returns_none_when_missing(tmp_path: Path) -> None:
     service = _build_service(tmp_path)
     assert service.get_task_report_date("not-found") is None
+
+
+def test_create_analysis_run_failure_records_failed_run(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    service = _build_service(tmp_path)
+
+    monkeypatch.setattr(
+        "daily_etf_analysis.services.analysis_service.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run-failed-1"),
+    )
+
+    def _boom(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(service.repository, "create_analysis_run_with_tasks", _boom)
+
+    with pytest.raises(RuntimeError):
+        service.create_analysis_run(symbols=["US:QQQ"], source="test")
+
+    run = service.repository.get_analysis_run("run-failed-1")
+    assert run is not None
+    assert run.status.value == "failed"
+    logs = service.repository.list_analysis_run_audit_logs("run-failed-1", limit=10)
+    assert any(item.get("event_type") == "run_failed" for item in logs)
