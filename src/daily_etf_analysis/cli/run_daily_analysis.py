@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from daily_etf_analysis.contracts.analysis_contracts import build_daily_report_contract
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus
 from daily_etf_analysis.notifications import NotificationManager
 from daily_etf_analysis.reports import render_daily_report_markdown
@@ -188,24 +189,6 @@ def run_daily_analysis(
         risk_top_n=service.settings.industry_risk_top_n,
         recommend_weights=service.settings.industry_recommend_weights,
     )
-    symbol_results = [
-        {
-            "run_id": row.get("run_id"),
-            "task_id": row.get("task_id"),
-            "symbol": row.get("symbol"),
-            "trade_date": row.get("trade_date"),
-            "score": row.get("score"),
-            "trend": row.get("trend"),
-            "action": row.get("action"),
-            "confidence": row.get("confidence"),
-            "horizon": row.get("horizon") or "next_trading_day",
-            "risk_alerts": row.get("risk_alerts", []),
-            "rationale": row.get("rationale") or row.get("summary", ""),
-            "degraded": bool(row.get("degraded", False)),
-            "fallback_reason": row.get("fallback_reason"),
-        }
-        for row in report_rows
-    ]
     failures = [
         {
             "task_id": task.task_id,
@@ -218,25 +201,21 @@ def run_daily_analysis(
         for task in final_tasks
         if task.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
     ]
-    degraded_count = sum(1 for row in symbol_results if row["degraded"])
-    decision_quality = {
-        "total": len(symbol_results),
-        "degraded_count": degraded_count,
-        "fallback_count": degraded_count,
-        "success_rate": (
-            (len(symbol_results) - degraded_count) / len(symbol_results)
-            if symbol_results
-            else 0.0
-        ),
-    }
-    run_summary = {
-        "run_id": run_id,
-        "task_ids": task_ids,
-        "status": task_status,
-        "report_date": report_date.isoformat(),
-        "market": report_market,
-        "total_symbols": len(selected_symbols),
-    }
+    report_contract = build_daily_report_contract(
+        target_date=report_date,
+        market=report_market,
+        report_rows=report_rows,
+        run_id=run_id,
+        failures=failures,
+        run_summary_extra={
+            "task_ids": task_ids,
+            "status": task_status,
+            "report_date": report_date.isoformat(),
+        },
+    )
+    run_summary = report_contract["run_summary"]
+    symbol_results = report_contract["symbol_results"]
+    decision_quality = report_contract["decision_quality"]
 
     report_path = _write_json_report(
         output_dir=output_dir,

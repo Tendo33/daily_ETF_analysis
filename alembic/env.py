@@ -6,7 +6,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from daily_etf_analysis.config.settings import get_settings
-from daily_etf_analysis.repositories.repository import Base
+from daily_etf_analysis.repositories.models import Base
 
 config = context.config
 if config.config_file_name is not None:

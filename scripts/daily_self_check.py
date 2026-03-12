@@ -25,7 +25,9 @@ def main() -> int:
     payload = {
         "schema_ready": schema.ok,
         "schema_reason": schema.reason,
-        "llm_model_configured": bool(settings.litellm_model or settings.llm_model_list),
+        "llm_model_configured": bool(
+            settings.openai_api_keys and settings.openai_model
+        ),
         "news_configured": bool(settings.tavily_api_keys),
         "notify_channels": settings.notify_channels,
         "schedule": schedule_check,

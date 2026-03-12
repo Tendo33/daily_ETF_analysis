@@ -116,3 +116,26 @@ def test_next_run_for_cron_weekday() -> None:
     after_run = datetime(2026, 3, 9, 21, 0, 30, tzinfo=tz)
     second = next_run_for_cron(cron_expr, after_run)
     assert second == datetime(2026, 3, 10, 21, 0, 0, tzinfo=tz)
+
+
+def test_scheduler_start_returns_false_when_disabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    settings = Settings(schedule_enabled=False)
+    service = _SpyService()
+    scheduler = EtfScheduler(service=service, settings=settings)
+    monkeypatch.setattr(EtfScheduler, "_loop", lambda self: None)
+
+    started = scheduler.start()
+
+    assert started is False
+
+
+def test_scheduler_start_force_enable_overrides_setting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    settings = Settings(schedule_enabled=False)
+    service = _SpyService()
+    scheduler = EtfScheduler(service=service, settings=settings)
+    monkeypatch.setattr(EtfScheduler, "_loop", lambda self: None)
+
+    started = scheduler.start(force_enable=True)
+
+    assert started is True
+    scheduler.stop()

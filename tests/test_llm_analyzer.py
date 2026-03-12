@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import date
 
-import litellm
-
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.core.time import utc_now_naive
 from daily_etf_analysis.domain import (
@@ -39,55 +37,64 @@ def _context(symbol: str = "US:QQQ") -> EtfAnalysisContext:
 
 
 def test_parse_failure_returns_neutral_fallback() -> None:
-    settings = Settings(litellm_model="openai/gpt-4o-mini", llm_model_list=[])
+    settings = Settings(openai_model="gpt-4o-mini", openai_api_keys=["sk-test"])
     analyzer = EtfAnalyzer(settings=settings)
     result = analyzer._parse_response("not-json", "US:QQQ", "openai/gpt-4o-mini")  # noqa: SLF001
     assert result.success is False
     assert result.score == 50
 
 
-def test_llm_fallback_model_used(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_llm_call_uses_base_url_and_model(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     settings = Settings(
-        litellm_model="openai/primary-model",
-        litellm_fallback_models=["openai/fallback-model"],
+        openai_model="gpt-4o-mini",
         openai_api_keys=["sk-test-123456"],
-        llm_model_list=[],
+        openai_base_url="https://api.example.com/v1",
     )
     analyzer = EtfAnalyzer(settings=settings)
-    analyzer.router = None
-    calls: list[str] = []
-
-    class _Msg:
-        def __init__(self, content: str) -> None:
-            self.content = content
-
-    class _Choice:
-        def __init__(self, content: str) -> None:
-            self.message = _Msg(content)
+    calls: list[dict[str, object]] = []
 
     class _Resp:
-        def __init__(self, content: str) -> None:
-            self.choices = [_Choice(content)]
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
 
-    def fake_completion(**kwargs):  # type: ignore[no-untyped-def]
-        model = kwargs["model"]
-        calls.append(model)
-        if model == "openai/primary-model":
-            raise RuntimeError("primary failed")
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):  # type: ignore[no-untyped-def]
+        calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
         return _Resp(
-            '{"score":72,"trend":"bullish","action":"buy","confidence":"medium","risk_alerts":["x"],"summary":"ok","key_points":["a"]}'
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"score":72,"trend":"bullish","action":"buy","confidence":"medium","risk_alerts":["x"],"summary":"ok","key_points":["a"]}'
+                        }
+                    }
+                ]
+            }
         )
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr("httpx.post", fake_post)
     result = analyzer.analyze(_context())
 
-    assert calls == ["openai/primary-model", "openai/fallback-model"]
+    assert calls
+    assert calls[0]["url"] == "https://api.example.com/v1/chat/completions"
     assert result.success is True
-    assert result.model_used == "openai/fallback-model"
+    assert result.model_used == "gpt-4o-mini"
 
 
 def test_low_confidence_action_is_downgraded_to_hold() -> None:
-    settings = Settings(litellm_model="openai/gpt-4o-mini", llm_model_list=[])
+    settings = Settings(openai_model="gpt-4o-mini", openai_api_keys=["sk-test"])
     analyzer = EtfAnalyzer(settings=settings)
     raw = (
         '{"score":65,"trend":"bullish","action":"buy","confidence":"low",'

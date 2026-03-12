@@ -36,7 +36,20 @@ class TavilyProvider(NewsProvider):
 
         from tavily import TavilyClient
 
-        client = TavilyClient(api_key=key)
+        base_url = self.settings.tavily_base_url
+        if base_url:
+            try:
+                client = TavilyClient(api_key=key, base_url=base_url)
+            except TypeError:
+                try:
+                    client = TavilyClient(api_key=key, api_base_url=base_url)
+                except TypeError as exc:
+                    raise RuntimeError(
+                        "TavilyClient does not support custom base URL; "
+                        "upgrade tavily-python or unset TAVILY_BASE_URL."
+                    ) from exc
+        else:
+            client = TavilyClient(api_key=key)
         response = client.search(
             query=query,
             search_depth="advanced",

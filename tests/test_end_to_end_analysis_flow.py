@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from daily_etf_analysis.api.app import app
 from daily_etf_analysis.cli.run_daily_analysis import run_daily_analysis
 from daily_etf_analysis.config.settings import Settings
 from daily_etf_analysis.domain import (
@@ -112,6 +111,18 @@ class _NotifierSpy:
         )
 
 
+class _RuntimeOverride:
+    def __init__(self, service: AnalysisService) -> None:
+        self._service = service
+        self.closed = False
+
+    def get_service(self) -> AnalysisService:
+        return self._service
+
+    def shutdown(self) -> None:
+        self.closed = True
+
+
 def _build_real_service(tmp_path: Path) -> AnalysisService:
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'e2e_flow.db'}",
@@ -144,7 +155,6 @@ def _wait_run_completed(
 def test_api_end_to_end_analysis_pipeline_and_history(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
     app_module = importlib.import_module("daily_etf_analysis.api.app")
     settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
@@ -156,59 +166,62 @@ def test_api_end_to_end_analysis_pipeline_and_history(
     )
 
     service = _build_real_service(tmp_path)
+    runtime = _RuntimeOverride(service)
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
 
-    def _service_override() -> AnalysisService:
-        return service
+    with TestClient(app_module.app) as client:
+        run_resp = client.post(
+            "/api/v1/analysis/runs",
+            json={"symbols": ["US:QQQ"], "force_refresh": True},
+        )
+        assert run_resp.status_code == 202
+        run_payload = run_resp.json()
+        run_id = str(run_payload["run_id"])
+        assert run_payload["status"] == "processing"
 
-    _service_override.cache_info = lambda: SimpleNamespace(currsize=1)  # type: ignore[attr-defined]
-    _service_override.cache_clear = lambda: None  # type: ignore[attr-defined]
-    monkeypatch.setattr(router_module, "_service", _service_override)
-    monkeypatch.setattr(app_module, "shutdown_service", lambda: None)
+        run_state = _wait_run_completed(client, run_id)
+        assert run_state["status"] == "completed"
+        assert run_state["total_tasks"] == 1
+        assert run_state["completed_tasks"] == 1
 
-    client = TestClient(app)
-    run_resp = client.post(
-        "/api/v1/analysis/runs",
-        json={"symbols": ["US:QQQ"], "force_refresh": True},
-    )
-    assert run_resp.status_code == 202
-    run_payload = run_resp.json()
-    run_id = str(run_payload["run_id"])
-    assert run_payload["status"] == "processing"
+        run_detail_resp = client.get(f"/api/v1/analysis/runs/{run_id}")
+        assert run_detail_resp.status_code == 200
+        run_detail_payload = run_detail_resp.json()
+        assert run_detail_payload["run_id"] == run_id
 
-    run_state = _wait_run_completed(client, run_id)
-    assert run_state["status"] == "completed"
-    assert run_state["total_tasks"] == 1
-    assert run_state["completed_tasks"] == 1
+        first_updated_at = run_detail_payload["updated_at"]
+        time.sleep(0.01)
+        run_detail_resp2 = client.get(f"/api/v1/analysis/runs/{run_id}")
+        assert run_detail_resp2.status_code == 200
+        assert run_detail_resp2.json()["updated_at"] == first_updated_at
 
-    run_detail_resp = client.get(f"/api/v1/analysis/runs/{run_id}")
-    assert run_detail_resp.status_code == 200
-    assert run_detail_resp.json()["run_id"] == run_id
+        refresh_resp = client.post(f"/api/v1/analysis/runs/{run_id}/refresh")
+        assert refresh_resp.status_code == 200
+        assert refresh_resp.json()["updated_at"] != first_updated_at
 
-    report_resp = client.get(
-        "/api/v1/reports/daily",
-        params={
-            "date": _FIXED_TRADE_DATE.isoformat(),
-            "market": "us",
-            "run_id": run_id,
-        },
-    )
-    assert report_resp.status_code == 200
-    report_payload = report_resp.json()
-    assert report_payload["run_summary"]["run_id"] == run_id
-    assert len(report_payload["symbol_results"]) == 1
-    assert report_payload["symbol_results"][0]["symbol"] == "US:QQQ"
-    assert report_payload["symbol_results"][0]["action"] == "buy"
+        report_resp = client.get(
+            "/api/v1/reports/daily",
+            params={
+                "date": _FIXED_TRADE_DATE.isoformat(),
+                "market": "us",
+                "run_id": run_id,
+            },
+        )
+        assert report_resp.status_code == 200
+        report_payload = report_resp.json()
+        assert report_payload["run_summary"]["run_id"] == run_id
+        assert len(report_payload["symbol_results"]) == 1
+        assert report_payload["symbol_results"][0]["symbol"] == "US:QQQ"
+        assert report_payload["symbol_results"][0]["action"] == "buy"
 
-    history_resp = client.get(
-        "/api/v1/history/signals",
-        params={"symbol": "US:QQQ", "run_id": run_id},
-    )
-    assert history_resp.status_code == 200
-    history_payload = history_resp.json()
-    assert len(history_payload["items"]) >= 1
-    assert history_payload["items"][0]["symbol"] == "US:QQQ"
-
-    service.shutdown()
+        history_resp = client.get(
+            "/api/v1/history/signals",
+            params={"symbol": "US:QQQ", "run_id": run_id},
+        )
+        assert history_resp.status_code == 200
+        history_payload = history_resp.json()
+        assert len(history_payload["items"]) >= 1
+        assert history_payload["items"][0]["symbol"] == "US:QQQ"
 
 
 def test_cli_end_to_end_run_daily_analysis_with_real_service(

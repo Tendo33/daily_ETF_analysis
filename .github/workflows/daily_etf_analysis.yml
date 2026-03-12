@@ -69,14 +69,16 @@ jobs:
 
       - name: Config probe (no secrets)
         env:
-          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
-          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: |
-          echo "LLM_CHANNELS configured: $([ -n "$LLM_CHANNELS" ] && echo yes || echo no)"
-          echo "LLM_AIHUBMIX_API_KEY configured: $([ -n "$LLM_AIHUBMIX_API_KEY" ] && echo yes || echo no)"
+          echo "OPENAI_MODEL configured: $([ -n "$OPENAI_MODEL" ] && echo yes || echo no)"
+          echo "OPENAI_API_KEY configured: $([ -n "$OPENAI_API_KEY" ] && echo yes || echo no)"
+          echo "OPENAI_BASE_URL configured: $([ -n "$OPENAI_BASE_URL" ] && echo yes || echo no)"
           echo "TAVILY_API_KEYS configured: $([ -n "$TAVILY_API_KEYS" ] && echo yes || echo no)"
           echo "FEISHU_WEBHOOK_URL configured: $([ -n "$FEISHU_WEBHOOK_URL" ] && echo yes || echo no)"
           echo "TUSHARE_TOKEN configured: $([ -n "$TUSHARE_TOKEN" ] && echo yes || echo no)"
@@ -91,11 +93,9 @@ jobs:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
           PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
-          LITELLM_MODEL: ${{ vars.LITELLM_MODEL }}
-          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
-          LLM_AIHUBMIX_BASE_URL: ${{ vars.LLM_AIHUBMIX_BASE_URL }}
-          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
-          LLM_AIHUBMIX_MODELS: ${{ vars.LLM_AIHUBMIX_MODELS }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
         run: |
           uv run python scripts/run_daily_analysis.py \
@@ -114,11 +114,9 @@ jobs:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
           PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
-          LITELLM_MODEL: ${{ vars.LITELLM_MODEL }}
-          LLM_CHANNELS: ${{ vars.LLM_CHANNELS }}
-          LLM_AIHUBMIX_BASE_URL: ${{ vars.LLM_AIHUBMIX_BASE_URL }}
-          LLM_AIHUBMIX_API_KEY: ${{ secrets.LLM_AIHUBMIX_API_KEY }}
-          LLM_AIHUBMIX_MODELS: ${{ vars.LLM_AIHUBMIX_MODELS }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FORCE_RUN_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_run || 'false' }}

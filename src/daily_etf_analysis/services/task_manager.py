@@ -108,26 +108,12 @@ class TaskManager:
         run_id: str | None = None,
         run_window: str | None = None,
     ) -> list[AnalysisTask]:
-        normalized_symbols = list(dict.fromkeys(normalize_symbol(s) for s in symbols))
-        if not normalized_symbols:
-            raise ValueError("No symbols provided")
+        normalized_symbols = self.validate_submission(
+            symbols, run_window=run_window, force_retry=force_retry
+        )
 
         tasks: list[AnalysisTask] = []
         with self._lock:
-            if run_window and not force_retry:
-                active_window_tasks = self._run_window_task_ids.get(run_window, set())
-                if active_window_tasks:
-                    raise ValueError(f"Run window lock active: {run_window}")
-            if not force_retry:
-                dedup_hits = [
-                    symbol
-                    for symbol in normalized_symbols
-                    if self._symbol_is_active(symbol)
-                ]
-                if dedup_hits:
-                    joined = ", ".join(sorted(set(dedup_hits)))
-                    raise ValueError(f"Task dedup hit for active symbols: {joined}")
-
             for symbol in normalized_symbols:
                 task = AnalysisTask(
                     task_id=uuid.uuid4().hex,
@@ -163,6 +149,90 @@ class TaskManager:
             inc_analysis_task(TaskStatus.PENDING.value)
             self._broadcast_event("task_created", self._task_payload(task))
         return tasks
+
+    def enqueue_persisted_tasks(
+        self,
+        tasks: list[AnalysisTask],
+        *,
+        force_refresh: bool,
+        skip_market_guard: bool,
+        request_id: str | None,
+        run_window: str | None,
+    ) -> list[AnalysisTask]:
+        if not tasks:
+            return []
+
+        with self._lock:
+            for task in tasks:
+                if not task.symbols:
+                    continue
+                symbol = normalize_symbol(task.symbols[0])
+                self._pending_queue.append(
+                    _QueuedTask(
+                        task_id=task.task_id,
+                        symbol=symbol,
+                        force_refresh=force_refresh,
+                        skip_market_guard=skip_market_guard,
+                        request_id=request_id,
+                        run_id=task.run_id,
+                        run_window=run_window,
+                        cancel_event=threading.Event(),
+                    )
+                )
+                self._task_symbols[task.task_id] = symbol
+                self._active_symbol_tasks[symbol] = task.task_id
+                if run_window:
+                    bucket = self._run_window_task_ids.setdefault(run_window, set())
+                    bucket.add(task.task_id)
+                    self._task_run_window[task.task_id] = run_window
+
+        for task in tasks:
+            inc_analysis_task(TaskStatus.PENDING.value)
+            self._broadcast_event("task_created", self._task_payload(task))
+        return tasks
+
+    def _validate_submission(
+        self,
+        normalized_symbols: list[str],
+        *,
+        run_window: str | None,
+        force_retry: bool,
+    ) -> None:
+        active_count = self.repository.count_active_tasks()
+        limit = self.settings.task_queue_max_size
+        if active_count + len(normalized_symbols) > limit:
+            raise ValueError(f"Task queue full: active={active_count} limit={limit}")
+        with self._lock:
+            if run_window and not force_retry:
+                active_window_tasks = self._run_window_task_ids.get(run_window, set())
+                if active_window_tasks:
+                    raise ValueError(f"Run window lock active: {run_window}")
+            if not force_retry:
+                dedup_hits = [
+                    symbol
+                    for symbol in normalized_symbols
+                    if self._symbol_is_active(symbol)
+                ]
+                if dedup_hits:
+                    joined = ", ".join(sorted(set(dedup_hits)))
+                    raise ValueError(f"Task dedup hit for active symbols: {joined}")
+
+    def validate_submission(
+        self,
+        symbols: list[str],
+        *,
+        run_window: str | None,
+        force_retry: bool,
+    ) -> list[str]:
+        normalized_symbols = list(dict.fromkeys(normalize_symbol(s) for s in symbols))
+        if not normalized_symbols:
+            raise ValueError("No symbols provided")
+        self._validate_submission(
+            normalized_symbols,
+            run_window=run_window,
+            force_retry=force_retry,
+        )
+        return normalized_symbols
 
     def _dispatch_loop(self) -> None:
         while not self._stop_event.is_set():

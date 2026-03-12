@@ -40,3 +40,29 @@ def test_tavily_rotation_and_cache(monkeypatch) -> None:  # type: ignore[no-unty
 
     assert first and second and third
     assert calls == ["k2", "k1"]
+
+
+def test_tavily_custom_base_url(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, str | None] = {}
+
+    class DummyClient:
+        def __init__(self, api_key: str, base_url: str | None = None) -> None:
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+
+        def search(self, **kwargs):  # type: ignore[no-untyped-def]
+            return {"results": []}
+
+    monkeypatch.setitem(
+        sys.modules, "tavily", SimpleNamespace(TavilyClient=DummyClient)
+    )
+    settings = Settings(
+        tavily_api_keys=["k1"],
+        tavily_base_url="https://tavily.ivanli.cc/api/tavily",
+    )
+    provider = TavilyProvider(settings=settings, cache_ttl_seconds=0)
+
+    provider.search("qqq")
+
+    assert captured["api_key"] == "k1"
+    assert captured["base_url"] == "https://tavily.ivanli.cc/api/tavily"

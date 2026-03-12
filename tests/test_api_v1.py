@@ -48,6 +48,9 @@ class _FakeService:
             "audit_logs": [],
         }
 
+    def refresh_analysis_run(self, run_id: str):  # type: ignore[no-untyped-def]
+        return self.build_run_contract(run_id)
+
     def get_daily_report_contract(self, **kwargs):  # type: ignore[no-untyped-def]
         return {
             "run_summary": {
@@ -166,18 +169,31 @@ class _FakeService:
         }
 
 
+class _FakeRuntime:
+    def __init__(self, service: _FakeService) -> None:
+        self._service = service
+        self.closed = False
+
+    def get_service(self) -> _FakeService:
+        return self._service
+
+    def shutdown(self) -> None:
+        self.closed = True
+
+
 @pytest.fixture
 def client_with_fake_service(monkeypatch):  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
     settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
     monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
     settings_module.reload_settings()
 
     fake_service = _FakeService()
-    monkeypatch.setattr(router_module, "_service", lambda: fake_service)
-    client = TestClient(app)
-    return client, fake_service
+    runtime = _FakeRuntime(fake_service)
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
+    with TestClient(app_module.app) as client:
+        yield client, fake_service
 
 
 def test_api_v1_core_endpoints(client_with_fake_service) -> None:
@@ -190,6 +206,10 @@ def test_api_v1_core_endpoints(client_with_fake_service) -> None:
     run_resp = client.get("/api/v1/analysis/runs/run-1")
     assert run_resp.status_code == 200
     assert run_resp.json()["status"] == "processing"
+
+    refresh_resp = client.post("/api/v1/analysis/runs/run-1/refresh")
+    assert refresh_resp.status_code == 200
+    assert refresh_resp.json()["run_id"] == "run-1"
 
     report_resp = client.get(
         "/api/v1/reports/daily",
@@ -254,24 +274,24 @@ def test_removed_endpoints_return_404(client_with_fake_service) -> None:
 
 
 def test_create_run_without_resolved_symbols_returns_422(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
     settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
     monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
     settings_module.reload_settings()
 
     fake_service = _FakeService()
-    monkeypatch.setattr(router_module, "_service", lambda: fake_service)
-    client = TestClient(app)
-
-    resp = client.post(
-        "/api/v1/analysis/runs",
-        json={"markets": ["cn"], "symbols": ["US:QQQ"]},
-    )
-    assert resp.status_code == 422
-    payload = resp.json()["detail"]
-    assert payload["code"] == "INVALID_RUN_REQUEST"
-    assert fake_service.run_calls == 1
+    runtime = _FakeRuntime(fake_service)
+    monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
+    with TestClient(app_module.app) as client:
+        resp = client.post(
+            "/api/v1/analysis/runs",
+            json={"markets": ["cn"], "symbols": ["US:QQQ"]},
+        )
+        assert resp.status_code == 422
+        payload = resp.json()["detail"]
+        assert payload["code"] == "INVALID_RUN_REQUEST"
+        assert fake_service.run_calls == 1
 
 
 def test_run_not_found_and_invalid_history_symbol(client_with_fake_service) -> None:
@@ -287,55 +307,57 @@ def test_run_not_found_and_invalid_history_symbol(client_with_fake_service) -> N
 
 
 def test_health() -> None:
-    client = TestClient(app)
-    resp = client.get("/api/health")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    with TestClient(app) as client:
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
 
 
 def test_auth_required_when_enabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    router_module = importlib.import_module("daily_etf_analysis.api.v1.router")
+    app_module = importlib.import_module("daily_etf_analysis.api.app")
     settings_module = importlib.import_module("daily_etf_analysis.config.settings")
     monkeypatch.setenv("API_AUTH_ENABLED", "true")
     monkeypatch.setenv("API_ADMIN_TOKEN", "secret-token")
     settings_module.reload_settings()
     try:
         fake_service = _FakeService()
-        monkeypatch.setattr(router_module, "_service", lambda: fake_service)
-        client = TestClient(app)
+        runtime = _FakeRuntime(fake_service)
+        monkeypatch.setattr(app_module, "_runtime_provider", lambda: runtime)
+        with TestClient(app_module.app) as client:
+            run_resp = client.post(
+                "/api/v1/analysis/runs", json={"symbols": ["CN:159659"]}
+            )
+            assert run_resp.status_code == 401
 
-        run_resp = client.post("/api/v1/analysis/runs", json={"symbols": ["CN:159659"]})
-        assert run_resp.status_code == 401
+            run_forbidden = client.post(
+                "/api/v1/analysis/runs",
+                json={"symbols": ["CN:159659"]},
+                headers={"Authorization": "Bearer wrong"},
+            )
+            assert run_forbidden.status_code == 403
 
-        run_forbidden = client.post(
-            "/api/v1/analysis/runs",
-            json={"symbols": ["CN:159659"]},
-            headers={"Authorization": "Bearer wrong"},
-        )
-        assert run_forbidden.status_code == 403
+            headers = {"Authorization": "Bearer secret-token"}
+            run_ok = client.post(
+                "/api/v1/analysis/runs",
+                json={"symbols": ["CN:159659"]},
+                headers=headers,
+            )
+            assert run_ok.status_code == 202
 
-        headers = {"Authorization": "Bearer secret-token"}
-        run_ok = client.post(
-            "/api/v1/analysis/runs",
-            json={"symbols": ["CN:159659"]},
-            headers=headers,
-        )
-        assert run_ok.status_code == 202
+            etfs_resp = client.put("/api/v1/etfs", json={"symbols": ["CN:159659"]})
+            assert etfs_resp.status_code == 401
 
-        etfs_resp = client.put("/api/v1/etfs", json={"symbols": ["CN:159659"]})
-        assert etfs_resp.status_code == 401
+            etfs_ok = client.put(
+                "/api/v1/etfs",
+                json={"symbols": ["CN:159659"]},
+                headers=headers,
+            )
+            assert etfs_ok.status_code == 200
 
-        etfs_ok = client.put(
-            "/api/v1/etfs",
-            json={"symbols": ["CN:159659"]},
-            headers=headers,
-        )
-        assert etfs_ok.status_code == 200
-
-        history_resp = client.get("/api/v1/history/signals")
-        assert history_resp.status_code == 401
-        history_ok = client.get("/api/v1/history/signals", headers=headers)
-        assert history_ok.status_code == 200
+            history_resp = client.get("/api/v1/history/signals")
+            assert history_resp.status_code == 401
+            history_ok = client.get("/api/v1/history/signals", headers=headers)
+            assert history_ok.status_code == 200
     finally:
         monkeypatch.delenv("API_AUTH_ENABLED", raising=False)
         monkeypatch.delenv("API_ADMIN_TOKEN", raising=False)
