@@ -36,6 +36,8 @@ jobs:
           uv run alembic upgrade head
 
       - name: Smoke run
+        env:
+          DATABASE_URL: sqlite:///./release_guard_probe.db
         run: |
           uv run python scripts/run_daily_analysis.py --symbols CN:159659 --skip-notify --wait-timeout-seconds 120 --poll-interval-seconds 1
 
