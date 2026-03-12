@@ -73,6 +73,7 @@ class EtfAnalysisResult:
     action: Action
     confidence: Confidence
     summary: str
+    name: str | None = None
     key_points: list[str] = field(default_factory=list)
     risk_alerts: list[str] = field(default_factory=list)
     model_used: str | None = None
@@ -83,11 +84,20 @@ class EtfAnalysisResult:
     rationale: str = ""
     degraded: bool = False
     fallback_reason: str | None = None
+    operation_advice: str | None = None
+    analysis_summary: str | None = None
+    trend_prediction: str | None = None
+    decision_type: str | None = None
+    confidence_level: str | None = None
+    dashboard: dict[str, Any] | None = None
+    llm_payload: dict[str, Any] | None = None
+    market_snapshot: dict[str, Any] | None = None
 
     @classmethod
     def neutral_fallback(cls, symbol: str, error_message: str) -> EtfAnalysisResult:
         return cls(
             symbol=symbol,
+            name=symbol,
             score=50,
             trend=Trend.NEUTRAL,
             action=Action.HOLD,
@@ -102,6 +112,14 @@ class EtfAnalysisResult:
             rationale="Fallback to neutral recommendation due to unavailable model output.",
             degraded=True,
             fallback_reason="NEUTRAL_FALLBACK",
+            operation_advice="观望",
+            analysis_summary="LLM analysis unavailable; using neutral fallback.",
+            trend_prediction="震荡",
+            decision_type="hold",
+            confidence_level="低",
+            dashboard={},
+            llm_payload={},
+            market_snapshot={},
         )
 
 

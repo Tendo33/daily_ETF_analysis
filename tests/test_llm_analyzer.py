@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as json_module
 from datetime import date
 
 from daily_etf_analysis.config.settings import Settings
@@ -72,12 +73,31 @@ def test_llm_call_uses_base_url_and_model(monkeypatch) -> None:  # type: ignore[
                 "timeout": timeout,
             }
         )
+        payload = {
+            "stock_name": "ETF",
+            "sentiment_score": 72,
+            "trend_prediction": "看多",
+            "operation_advice": "买入",
+            "decision_type": "buy",
+            "confidence_level": "中",
+            "dashboard": {
+                "core_conclusion": {
+                    "one_sentence": "ok",
+                    "signal_type": "🟢买入信号",
+                    "time_sensitivity": "本周内",
+                    "position_advice": {"no_position": "买入", "has_position": "持有"},
+                },
+                "intelligence": {"risk_alerts": []},
+            },
+            "analysis_summary": "ok",
+            "key_points": "a",
+        }
         return _Resp(
             {
                 "choices": [
                     {
                         "message": {
-                            "content": '{"score":72,"trend":"bullish","action":"buy","confidence":"medium","risk_alerts":["x"],"summary":"ok","key_points":["a"]}'
+                            "content": json_module.dumps(payload, ensure_ascii=False)
                         }
                     }
                 ]
@@ -96,10 +116,30 @@ def test_llm_call_uses_base_url_and_model(monkeypatch) -> None:  # type: ignore[
 def test_low_confidence_action_is_downgraded_to_hold() -> None:
     settings = Settings(openai_model="gpt-4o-mini", openai_api_keys=["sk-test"])
     analyzer = EtfAnalyzer(settings=settings)
-    raw = (
-        '{"score":65,"trend":"bullish","action":"buy","confidence":"low",'
-        '"risk_alerts":["volatility"],"summary":"cautious","key_points":["a"],'
-        '"horizon":"next_trading_day","rationale":"weak conviction"}'
+    raw = json_module.dumps(
+        {
+            "stock_name": "ETF",
+            "sentiment_score": 65,
+            "trend_prediction": "看多",
+            "operation_advice": "买入",
+            "decision_type": "buy",
+            "confidence_level": "低",
+            "dashboard": {
+                "core_conclusion": {
+                    "one_sentence": "cautious",
+                    "signal_type": "🟡持有观望",
+                    "time_sensitivity": "本周内",
+                    "position_advice": {
+                        "no_position": "观望",
+                        "has_position": "持有",
+                    },
+                },
+                "intelligence": {"risk_alerts": ["volatility"]},
+            },
+            "analysis_summary": "cautious",
+            "key_points": "a",
+        },
+        ensure_ascii=False,
     )
     result = analyzer._parse_response(raw, "US:QQQ", "openai/gpt-4o-mini")  # noqa: SLF001
     assert result.success is True

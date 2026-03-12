@@ -48,6 +48,16 @@ settings = get_settings()
 print(settings.database_url)
 ```
 
+## 报告与通知相关配置 / Report & Notification Settings
+
+常用环境变量（部分兼容股票版命名）：
+
+- `REPORT_RENDERER_ENABLED`：是否启用模板渲染（默认 true）
+- `REPORT_TYPE`：`simple` / `full` / `brief`
+- `REPORT_SUMMARY_ONLY`：仅输出摘要（默认 false）
+- `FEISHU_MAX_BYTES`：飞书单条消息最大字节数（默认 20000）
+- `WEBHOOK_VERIFY_SSL`：Webhook HTTPS 校验（默认 true）
+
 ## 配置优先级 / Priority
 
 1. 环境变量（最高）

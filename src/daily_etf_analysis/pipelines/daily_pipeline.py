@@ -10,7 +10,9 @@ from daily_etf_analysis.core.trading_calendar import is_market_open_today
 from daily_etf_analysis.domain import (
     EtfAnalysisContext,
     EtfAnalysisResult,
+    EtfDailyBar,
     EtfInstrument,
+    EtfRealtimeQuote,
     normalize_symbol,
     split_symbol,
 )
@@ -119,6 +121,9 @@ class DailyPipeline:
                     self.repository.save_realtime_quote(quote)
 
                 factors = compute_factors(bars=bars, quote=quote)
+                market_snapshot = _build_market_snapshot(
+                    bars=bars, quote=quote, factors=factors
+                )
                 benchmark = self._benchmark_from_mapping(symbol) or code
                 news, provider_name = self.news_manager.search(
                     query=f"{benchmark} ETF market outlook",
@@ -171,6 +176,8 @@ class DailyPipeline:
                         benchmark_index=benchmark,
                         force_refresh=force_refresh,
                         news_provider=provider_name,
+                        market_snapshot=market_snapshot,
+                        llm_payload=result.llm_payload,
                     ),
                     news_items=context.news_items,
                 )
@@ -195,6 +202,8 @@ class DailyPipeline:
                         benchmark_index=self._benchmark_from_mapping(symbol) or code,
                         force_refresh=force_refresh,
                         news_provider=None,
+                        market_snapshot={},
+                        llm_payload={},
                     ),
                     news_items=[],
                 )
@@ -214,6 +223,8 @@ def _build_context_snapshot(
     benchmark_index: str,
     force_refresh: bool,
     news_provider: str | None,
+    market_snapshot: dict[str, object] | None = None,
+    llm_payload: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "symbol": symbol,
@@ -221,4 +232,56 @@ def _build_context_snapshot(
         "benchmark_index": benchmark_index,
         "force_refresh": force_refresh,
         "news_provider": news_provider,
+        "market_snapshot": market_snapshot or {},
+        "llm_payload": llm_payload or {},
     }
+
+
+def _build_market_snapshot(
+    *,
+    bars: list[EtfDailyBar],
+    quote: EtfRealtimeQuote | None,
+    factors: dict[str, object],
+) -> dict[str, object]:
+    latest_bar = bars[-1] if bars else None
+    prev_bar = bars[-2] if len(bars) > 1 else None
+    close = latest_bar.close if latest_bar else None
+    prev_close = prev_bar.close if prev_bar else None
+    open_price = latest_bar.open if latest_bar else None
+    high = latest_bar.high if latest_bar else None
+    low = latest_bar.low if latest_bar else None
+    pct_chg = (
+        latest_bar.pct_chg
+        if latest_bar and latest_bar.pct_chg is not None
+        else _pct_change(prev_close, close)
+    )
+    change_amount = None
+    amplitude = None
+    if close is not None and prev_close:
+        change_amount = close - prev_close
+        if high is not None and low is not None and prev_close:
+            amplitude = (high - low) / prev_close * 100
+    price = quote.price if quote is not None else close
+    return {
+        "close": close,
+        "prev_close": prev_close,
+        "open": open_price,
+        "high": high,
+        "low": low,
+        "pct_chg": pct_chg,
+        "change_amount": change_amount,
+        "amplitude": amplitude,
+        "volume": latest_bar.volume if latest_bar else None,
+        "amount": latest_bar.amount if latest_bar else None,
+        "price": price,
+        "volume_ratio": factors.get("volume_ratio"),
+        "turnover_rate": factors.get("turnover"),
+        "source": (quote.source if quote is not None else None)
+        or (latest_bar.source if latest_bar else None),
+    }
+
+
+def _pct_change(start: float | None, end: float | None) -> float | None:
+    if start is None or end is None or start == 0:
+        return None
+    return (end - start) / start * 100

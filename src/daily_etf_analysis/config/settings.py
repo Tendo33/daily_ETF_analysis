@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 load_dotenv(override=False)
@@ -80,6 +80,12 @@ class Settings(BaseSettings):
 
     notify_channels: CsvList = Field(default_factory=lambda: ["feishu"])
     feishu_webhook_url: str | None = Field(default=None)
+    feishu_max_bytes: int = Field(
+        default=20000, ge=1000, validation_alias=AliasChoices("FEISHU_MAX_BYTES")
+    )
+    webhook_verify_ssl: bool = Field(
+        default=True, validation_alias=AliasChoices("WEBHOOK_VERIFY_SSL")
+    )
     wechat_webhook_url: str | None = Field(default=None)
     telegram_bot_token: str | None = Field(default=None)
     telegram_chat_id: str | None = Field(default=None)
@@ -90,7 +96,15 @@ class Settings(BaseSettings):
     email_from: str | None = Field(default=None)
     email_to: CsvList = Field(default_factory=list)
     report_templates_dir: str = Field(default="templates")
-    report_renderer_enabled: bool = Field(default=False)
+    report_renderer_enabled: bool = Field(
+        default=True, validation_alias=AliasChoices("REPORT_RENDERER_ENABLED")
+    )
+    report_type: str = Field(
+        default="simple", validation_alias=AliasChoices("REPORT_TYPE")
+    )
+    report_summary_only: bool = Field(
+        default=False, validation_alias=AliasChoices("REPORT_SUMMARY_ONLY")
+    )
     report_integrity_enabled: bool = Field(default=True)
     report_history_compare_n: int = Field(default=0, ge=0, le=60)
     markdown_to_image_channels: CsvList = Field(default_factory=list)
@@ -157,6 +171,15 @@ class Settings(BaseSettings):
         val = value.strip().lower()
         if val not in allowed:
             raise ValueError(f"md2img_engine must be one of {sorted(allowed)}")
+        return val
+
+    @field_validator("report_type")
+    @classmethod
+    def validate_report_type(cls, value: str) -> str:
+        allowed = {"simple", "full", "brief"}
+        val = value.strip().lower()
+        if val not in allowed:
+            raise ValueError(f"report_type must be one of {sorted(allowed)}")
         return val
 
     @field_validator("tavily_base_url")

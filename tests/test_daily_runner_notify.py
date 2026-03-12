@@ -60,8 +60,14 @@ class _FakeManager:
         )
 
 
-def test_daily_runner_outputs_markdown_and_channel_result(tmp_path: Path) -> None:
-    service = _FakeService(Settings(etf_list=["US:QQQ"]))
+def test_daily_runner_outputs_markdown_and_channel_result(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("REPORT_RENDERER_ENABLED", "false")
+    from daily_etf_analysis.config.settings import reload_settings
+
+    reload_settings()
+    service = _FakeService(Settings(etf_list=["US:QQQ"], report_renderer_enabled=False))
     result = run_daily_analysis(
         service=service,  # type: ignore[arg-type]
         notifier=_FakeManager(),  # type: ignore[arg-type]

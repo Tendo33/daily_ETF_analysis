@@ -15,13 +15,20 @@ def test_feishu_notifier_sends_payload(monkeypatch) -> None:  # type: ignore[no-
     captured: dict[str, object] = {}
 
     class _Resp:
+        def __init__(self) -> None:
+            self._payload = {"code": 0}
+
         def raise_for_status(self) -> None:
             return None
 
-    def _post(url, json, timeout):  # type: ignore[no-untyped-def]
+        def json(self):  # type: ignore[no-untyped-def]
+            return self._payload
+
+    def _post(url, json, timeout, verify):  # type: ignore[no-untyped-def]
         captured["url"] = url
         captured["payload"] = json
         captured["timeout"] = timeout
+        captured["verify"] = verify
         return _Resp()
 
     monkeypatch.setattr("daily_etf_analysis.notifications.feishu.httpx.post", _post)
@@ -34,11 +41,11 @@ def test_feishu_notifier_sends_payload(monkeypatch) -> None:  # type: ignore[no-
     assert captured["url"] == "https://example.com/hook"
     payload = captured["payload"]
     assert isinstance(payload, dict)
-    assert payload["msg_type"] == "post"  # type: ignore[index]
+    assert payload["msg_type"] in {"interactive", "text"}  # type: ignore[index]
 
 
 def test_feishu_notifier_handles_post_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    def _post(url, json, timeout):  # type: ignore[no-untyped-def]
+    def _post(url, json, timeout, verify):  # type: ignore[no-untyped-def]
         raise RuntimeError("network down")
 
     monkeypatch.setattr("daily_etf_analysis.notifications.feishu.httpx.post", _post)
@@ -47,4 +54,4 @@ def test_feishu_notifier_handles_post_error(monkeypatch) -> None:  # type: ignor
     result = notifier.send_markdown(title="Daily ETF", markdown="summary")
 
     assert result.sent is False
-    assert result.reason == "delivery_failed"
+    assert result.reason == "failed"

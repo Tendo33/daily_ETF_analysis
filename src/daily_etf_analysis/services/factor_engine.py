@@ -7,11 +7,13 @@ from daily_etf_analysis.domain import EtfDailyBar, EtfRealtimeQuote
 
 def compute_factors(
     bars: list[EtfDailyBar], quote: EtfRealtimeQuote | None = None
-) -> dict[str, float | int | str | None]:
+) -> dict[str, object]:
     if not bars:
         return {"data_quality": "empty"}
 
     closes = [bar.close for bar in bars]
+    highs = [bar.high for bar in bars]
+    lows = [bar.low for bar in bars]
     volumes = [bar.volume or 0.0 for bar in bars]
     latest_close = closes[-1]
     latest_price = quote.price if quote is not None else latest_close
@@ -37,8 +39,15 @@ def compute_factors(
 
     avg_vol20 = _mean(volumes[-20:]) if volumes else 0.0
     volume_ratio = (volumes[-1] / avg_vol20) if avg_vol20 else None
+    volume_status = _volume_status(volume_ratio)
 
-    factors: dict[str, float | int | str | None] = {
+    bias_ma5 = _pct_change(ma5, latest_price) * 100 if ma5 else None
+    bias_status = _bias_status(bias_ma5)
+    support_level = _support_level(lows[-20:]) if lows else None
+    resistance_level = _resistance_level(highs[-20:]) if highs else None
+    trend_score = _trend_score(ma5, ma10, ma20, ma20_prev)
+
+    factors: dict[str, object] = {
         "latest_price": latest_price,
         "latest_close": latest_close,
         "change_pct": _pct_change(prev_close, latest_price) if prev_close else None,
@@ -51,9 +60,21 @@ def compute_factors(
         "volatility_annualized": volatility,
         "max_drawdown_60": max_drawdown,
         "volume_ratio": volume_ratio,
+        "volume_status": volume_status,
         "trend_alignment": "bullish" if ma5 > ma10 > ma20 else "non_bullish",
+        "trend_score": trend_score,
+        "bias_ma5": bias_ma5,
+        "bias_status": bias_status,
+        "support_level": support_level,
+        "resistance_level": resistance_level,
         "data_points": len(bars),
         "data_quality": "ok" if len(bars) >= 30 else "limited",
+    }
+    factors["chip_structure"] = {
+        "profit_ratio": "N/A",
+        "avg_cost": "N/A",
+        "concentration": "N/A",
+        "chip_health": "N/A",
     }
     if quote is not None:
         factors["turnover"] = quote.turnover
@@ -93,3 +114,46 @@ def _max_drawdown(values: list[float]) -> float:
             dd = (peak - value) / peak
             max_dd = max(max_dd, dd)
     return max_dd
+
+
+def _bias_status(bias_ma5: float | None) -> str:
+    if bias_ma5 is None:
+        return "N/A"
+    if bias_ma5 < 2:
+        return "安全"
+    if bias_ma5 < 5:
+        return "警戒"
+    return "危险"
+
+
+def _support_level(lows: list[float]) -> float | None:
+    if not lows:
+        return None
+    return min(lows)
+
+
+def _resistance_level(highs: list[float]) -> float | None:
+    if not highs:
+        return None
+    return max(highs)
+
+
+def _trend_score(ma5: float, ma10: float, ma20: float, ma20_prev: float) -> int:
+    score = 50
+    if ma5 > ma10 > ma20:
+        score += 20
+    if ma20_prev and ma20 > ma20_prev:
+        score += 10
+    if ma5 < ma10 < ma20:
+        score -= 20
+    return max(0, min(100, score))
+
+
+def _volume_status(volume_ratio: float | None) -> str:
+    if volume_ratio is None:
+        return "N/A"
+    if volume_ratio >= 1.5:
+        return "放量"
+    if volume_ratio <= 0.7:
+        return "缩量"
+    return "平量"

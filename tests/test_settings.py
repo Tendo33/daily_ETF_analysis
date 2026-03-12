@@ -57,3 +57,9 @@ def test_json_env_list_still_supported(monkeypatch) -> None:  # type: ignore[no-
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
 
     assert settings.etf_list == ["CN:159659", "US:QQQ"]
+
+
+def test_report_type_alias(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("REPORT_TYPE", "brief")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.report_type == "brief"

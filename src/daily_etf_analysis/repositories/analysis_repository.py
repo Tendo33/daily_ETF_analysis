@@ -624,6 +624,8 @@ class AnalysisRepositoryMixin:
                         "factors": json.loads(row.factors_json),
                         "key_points": json.loads(row.key_points_json),
                         "risk_alerts": json.loads(row.risk_alerts_json),
+                        "context_snapshot": json.loads(row.context_snapshot_json),
+                        "news_items": json.loads(row.news_items_json),
                     }
                 )
             return result
