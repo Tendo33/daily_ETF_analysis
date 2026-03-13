@@ -17,14 +17,14 @@ class SchemaGuardResult:
     reason: str | None = None
 
 
-def should_enforce_schema_guard() -> bool:
-    if os.getenv("DISABLE_SCHEMA_GUARD", "").strip() == "1":
+def should_enforce_schema_guard(settings: Settings) -> bool:
+    if settings.disable_schema_guard:
         return False
     return not os.getenv("PYTEST_CURRENT_TEST")
 
 
 def ensure_schema_ready(engine: Engine, settings: Settings) -> None:
-    if not should_enforce_schema_guard():
+    if not should_enforce_schema_guard(settings):
         return
     inspector = inspect(engine)
     if "alembic_version" not in inspector.get_table_names():

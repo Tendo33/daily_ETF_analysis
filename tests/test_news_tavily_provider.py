@@ -31,7 +31,7 @@ def test_tavily_rotation_and_cache(monkeypatch) -> None:  # type: ignore[no-unty
     monkeypatch.setitem(
         sys.modules, "tavily", SimpleNamespace(TavilyClient=DummyClient)
     )
-    settings = Settings(tavily_api_keys=["k1", "k2"])
+    settings = Settings(_env_file=None, tavily_api_keys=["k1", "k2"])
     provider = TavilyProvider(settings=settings, cache_ttl_seconds=9999)
 
     first = provider.search("qqq")

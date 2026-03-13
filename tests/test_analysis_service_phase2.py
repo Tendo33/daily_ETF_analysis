@@ -19,6 +19,7 @@ from daily_etf_analysis.services.analysis_service import AnalysisService
 
 def _build_service(tmp_path: Path) -> AnalysisService:
     settings = Settings(
+        _env_file=None,
         database_url=f"sqlite:///{tmp_path / 'phase2.db'}",
         etf_list=["US:QQQ", "CN:159659"],
         index_proxy_map={"NDX": ["US:QQQ", "CN:159659"]},

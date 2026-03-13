@@ -33,7 +33,7 @@ class EtfRepository(
 
     def init_db(self) -> None:
         # Runtime path is Alembic-first. Keep create_all only for isolated test DBs.
-        if should_enforce_schema_guard():
+        if should_enforce_schema_guard(self.settings):
             return
         Base.metadata.create_all(self.engine)
 

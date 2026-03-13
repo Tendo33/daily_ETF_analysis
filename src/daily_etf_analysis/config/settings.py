@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
-load_dotenv(override=False)
 
 
 @dataclass(slots=True)
@@ -48,6 +47,9 @@ class Settings(BaseSettings):
     )
     markets_enabled: CsvList = Field(default_factory=lambda: ["cn", "hk", "us"])
     database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
+    disable_schema_guard: bool = Field(
+        default=False, validation_alias=AliasChoices("DISABLE_SCHEMA_GUARD")
+    )
 
     openai_model: str = Field(default="gpt-4o-mini")
     openai_api_key: str | None = Field(default=None)
@@ -195,6 +197,17 @@ class Settings(BaseSettings):
             return None
         trimmed = value.strip()
         return trimmed or None
+
+    @field_validator("disable_schema_guard", mode="before")
+    @classmethod
+    def normalize_disable_schema_guard(cls, value: Any) -> Any:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return False
+        return value
 
     @field_validator(
         "etf_list",
@@ -389,5 +402,25 @@ def get_settings() -> Settings:
 def reload_settings(env_file: Path | None = None) -> Settings:
     get_settings.cache_clear()
     if env_file is None:
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            return Settings(_env_file=None)  # type: ignore[call-arg]
         return get_settings()
-    return Settings(_env_file=str(env_file))  # type: ignore[call-arg]
+    overrides = {
+        key: value
+        for key, value in dotenv_values(env_file).items()
+        if value is not None
+    }
+    if not overrides:
+        return Settings(_env_file=str(env_file))  # type: ignore[call-arg]
+    backup: dict[str, str | None] = {}
+    for key, value in overrides.items():
+        backup[key] = os.environ.get(key)
+        os.environ[key] = value
+    try:
+        return Settings(_env_file=str(env_file))  # type: ignore[call-arg]
+    finally:
+        for key, previous in backup.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous

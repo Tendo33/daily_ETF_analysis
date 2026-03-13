@@ -71,6 +71,16 @@ def test_theme_intel_enabled_flag(monkeypatch) -> None:  # type: ignore[no-untyp
     assert settings.theme_intel_enabled is False
 
 
+def test_disable_schema_guard_flag(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DISABLE_SCHEMA_GUARD", "true")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert getattr(settings, "disable_schema_guard", None) is True
+
+    monkeypatch.setenv("DISABLE_SCHEMA_GUARD", "false")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert getattr(settings, "disable_schema_guard", None) is False
+
+
 def test_etf_theme_map_parsing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv(
         "ETF_THEME_MAP",

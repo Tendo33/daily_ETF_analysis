@@ -46,3 +46,17 @@ def test_schema_guard_passes_when_revision_and_columns_present(
     settings = Settings(database_url=f"sqlite:///{db_path}")
     result = check_schema_ready(engine, settings)
     assert result.ok is True
+
+
+def test_schema_guard_disabled_by_settings(
+    monkeypatch, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("DISABLE_SCHEMA_GUARD", "true")
+
+    db_path = tmp_path / "guard_disabled.db"
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{db_path}")
+
+    result = check_schema_ready(engine, settings)
+    assert result.ok is True
