@@ -200,8 +200,6 @@ uv run python main.py --serve --schedule
 # API only
 uv run python main.py --serve-only
 
-# Run market review only
-uv run python main.py --market-review --no-notify
 ```
 
 ### Dedicated scheduler process

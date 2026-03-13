@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from daily_etf_analysis.config.settings import Settings
@@ -11,6 +12,8 @@ from daily_etf_analysis.domain import (
     split_symbol,
 )
 from daily_etf_analysis.providers.market_data.base import MarketDataProvider
+
+logger = logging.getLogger(__name__)
 
 
 class EfinanceProvider(MarketDataProvider):

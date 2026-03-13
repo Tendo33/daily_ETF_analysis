@@ -13,6 +13,7 @@ class SystemConfigService:
     UPDATABLE_FIELDS = {
         "etf_list",
         "index_proxy_map",
+        "etf_theme_map",
         "markets_enabled",
         "news_max_age_days",
         "news_provider_priority",
@@ -27,6 +28,7 @@ class SystemConfigService:
         "report_summary_only",
         "feishu_max_bytes",
         "webhook_verify_ssl",
+        "theme_intel_enabled",
         "schedule_enabled",
         "schedule_cron_cn",
         "schedule_cron_hk",

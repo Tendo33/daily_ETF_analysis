@@ -37,8 +37,8 @@ def render_daily_report_markdown(
     disclaimer: str,
     notes: str | None = None,
     skip_reason: str | None = None,
-    market_review: dict[str, Any] | None = None,
     history_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
+    global_summary_text: str | None = None,
 ) -> str:
     settings = get_settings()
     normalized_rows, integrity_notes = _normalize_report_rows(
@@ -56,8 +56,8 @@ def render_daily_report_markdown(
             disclaimer=disclaimer,
             notes=_merge_notes(notes, integrity_notes),
             skip_reason=skip_reason,
-            market_review=market_review,
             history_by_symbol=history_by_symbol,
+            global_summary_text=global_summary_text,
         )
         if template_markdown:
             inc_report_render("template")
@@ -100,13 +100,13 @@ def render_daily_report_markdown(
         if merged_notes:
             notes_block = f"## Notes\n{merged_notes}\n\n"
 
-    market_review_block = ""
-    if market_review:
-        market_review_block = _render_market_review_section(market_review)
-
     history_block = ""
     if history_by_symbol:
         history_block = _render_history_section(history_by_symbol)
+
+    global_summary_block = ""
+    if global_summary_text:
+        global_summary_block = f"## Global Summary\n{global_summary_text}\n\n"
 
     inc_report_render("fallback")
     return (
@@ -117,11 +117,11 @@ def render_daily_report_markdown(
         f"- Date: {report_date.isoformat()}\n"
         f"- Market: {market}\n"
         f"- Symbols analyzed: {len(report_rows)}\n\n"
+        f"{global_summary_block}"
         "## Top Symbols\n"
         f"{top_section}\n\n"
         "## Risk Alerts\n"
         f"{risk_section}\n\n"
-        f"{market_review_block}"
         f"{history_block}"
         f"{notes_block}"
         f"Disclaimer: {disclaimer}\n"
@@ -138,8 +138,8 @@ def _render_with_template(
     disclaimer: str,
     notes: str | None,
     skip_reason: str | None,
-    market_review: dict[str, Any] | None,
     history_by_symbol: dict[str, list[dict[str, Any]]] | None,
+    global_summary_text: str | None,
 ) -> str | None:
     settings = get_settings()
     templates_dir = _resolve_templates_dir(settings.report_templates_dir)
@@ -154,7 +154,7 @@ def _render_with_template(
         report_date=report_date,
         summary_only=settings.report_summary_only,
         history_by_symbol=history_by_symbol,
-        market_review=market_review,
+        global_summary_text=global_summary_text,
     )
     context.update(
         {
@@ -195,7 +195,7 @@ def _build_template_context(
     report_date: date,
     summary_only: bool,
     history_by_symbol: dict[str, list[dict[str, Any]]] | None,
-    market_review: dict[str, Any] | None,
+    global_summary_text: str | None,
 ) -> dict[str, Any]:
     results: list[ResultView] = []
     for row in report_rows:
@@ -282,7 +282,7 @@ def _build_template_context(
         "clean_sniper": _clean_sniper_value,
         "history_by_code": history_by_code,
         "history_by_symbol": history_by_symbol or {},
-        "market_review": market_review,
+        "global_summary_text": global_summary_text,
     }
 
 
@@ -300,6 +300,18 @@ def _ensure_dashboard(
         fallback = _build_data_perspective(factors, market_snapshot)
         if fallback:
             dashboard_payload["data_perspective"] = fallback
+    else:
+        etf_structure = _build_etf_structure(factors)
+        if etf_structure:
+            data_perspective.setdefault("etf_structure", etf_structure)
+            dashboard_payload["data_perspective"] = data_perspective
+
+    theme_intel = factors.get("theme_intel")
+    if isinstance(theme_intel, dict) and theme_intel:
+        intelligence = dashboard_payload.get("intelligence")
+        dashboard_payload["intelligence"] = _merge_intelligence(
+            intelligence, theme_intel
+        )
     return dashboard_payload
 
 
@@ -377,7 +389,44 @@ def _build_data_perspective(
             "volume_meaning": volume_meaning,
         },
         "chip_structure": chip_payload,
+        "etf_structure": _build_etf_structure(factors),
     }
+
+
+def _build_etf_structure(factors: dict[str, Any]) -> dict[str, Any]:
+    etf_features = factors.get("etf_features")
+    if not isinstance(etf_features, dict):
+        return {}
+    payload = {
+        "premium_discount_pct": etf_features.get("premium_discount_pct"),
+        "tracking_error": etf_features.get("tracking_error"),
+        "share_change_pct": etf_features.get("share_change_pct"),
+        "aum_change_pct": etf_features.get("aum_change_pct"),
+        "liquidity_score": etf_features.get("liquidity_score"),
+        "spread_proxy": etf_features.get("spread_proxy"),
+        "intraday_gap_pct": etf_features.get("intraday_gap_pct"),
+        "data_quality": etf_features.get("data_quality"),
+    }
+    if not any(value is not None and value != "" for value in payload.values()):
+        return {}
+    return payload
+
+
+def _merge_intelligence(
+    existing: dict[str, Any] | object, theme_intel: dict[str, Any]
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    if isinstance(existing, dict):
+        merged.update(existing)
+    if not merged.get("latest_news"):
+        merged["latest_news"] = theme_intel.get("latest_news", "")
+    if not merged.get("positive_catalysts"):
+        merged["positive_catalysts"] = theme_intel.get("positive_catalysts", [])
+    if not merged.get("risk_alerts"):
+        merged["risk_alerts"] = theme_intel.get("risk_alerts", [])
+    if not merged.get("sentiment_summary"):
+        merged["sentiment_summary"] = theme_intel.get("sentiment_summary", "")
+    return merged
 
 
 def _remap_history(
@@ -563,65 +612,6 @@ def _normalize_report_rows(
     return normalized, notes
 
 
-def _render_market_review_section(market_review: dict[str, Any]) -> str:
-    avg_score = market_review.get("avg_score")
-    trend_counts = market_review.get("trend_counts", {})
-    action_counts = market_review.get("action_counts", {})
-    top = market_review.get("top", [])
-    bottom = market_review.get("bottom", [])
-
-    trend_line = ", ".join(f"{k}={v}" for k, v in trend_counts.items()) or "-"
-    action_line = ", ".join(f"{k}={v}" for k, v in action_counts.items()) or "-"
-
-    top_lines = [
-        f"- {row.get('symbol', '-')}: score={row.get('score', '-')}, action={row.get('action', '-')}"
-        for row in top
-    ]
-    bottom_lines = [
-        f"- {row.get('symbol', '-')}: score={row.get('score', '-')}, action={row.get('action', '-')}"
-        for row in bottom
-    ]
-
-    top_section = "\n".join(top_lines) if top_lines else "- No data"
-    bottom_section = "\n".join(bottom_lines) if bottom_lines else "- No data"
-
-    industry_lines = _render_industry_lines(market_review.get("industry", []))
-    industry_section = ""
-    if industry_lines:
-        industry_section = f"### Industry Summary\n{industry_lines}\n\n"
-
-    return (
-        "## Market Review\n"
-        f"- Avg score: {avg_score if avg_score is not None else '-'}\n"
-        f"- Trend distribution: {trend_line}\n"
-        f"- Action distribution: {action_line}\n\n"
-        "### Top ETFs\n"
-        f"{top_section}\n\n"
-        "### Bottom ETFs\n"
-        f"{bottom_section}\n\n"
-        f"{industry_section}"
-    )
-
-
-def _render_industry_lines(rows: list[dict[str, Any]]) -> str:
-    lines = []
-    for row in rows:
-        lines.append(
-            "- {industry}: count={count}, avg_score={avg_score}, top={top_symbol}, "
-            "actions={action_counts}, recommend={recommend_level}({recommend_score}), "
-            "trend_changes={trend_change_count}, risk_top={risk_top}".format(
-                industry=row.get("industry"),
-                count=row.get("count"),
-                avg_score=row.get("avg_score"),
-                top_symbol=row.get("top_symbol"),
-                action_counts=row.get("action_counts"),
-                recommend_level=row.get("recommend_level"),
-                recommend_score=row.get("recommend_score"),
-                trend_change_count=row.get("trend_change_count"),
-                risk_top=row.get("risk_top"),
-            )
-        )
-    return "\n".join(lines)
 
 
 def _render_history_section(

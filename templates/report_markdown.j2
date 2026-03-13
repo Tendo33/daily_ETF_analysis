@@ -3,6 +3,12 @@
 
 > 共分析 **{{ results|length }}** 只 ETF | 🟢买入:{{ buy_count }} 🟡观望:{{ hold_count }} 🔴卖出:{{ sell_count }}
 
+{% if global_summary_text %}
+## 🧠 全局短评
+
+{{ global_summary_text }}
+{% endif %}
+
 ## 📊 分析结果摘要
 
 {% for e in enriched %}
@@ -99,6 +105,11 @@
 {% set chip_data = data_persp.get('chip_structure', {}) %}
 {% if chip_data %}
 **筹码**: 获利比例 {{ chip_data.get('profit_ratio', 'N/A') }} | 平均成本 {{ chip_data.get('avg_cost', 'N/A') }} | 集中度 {{ chip_data.get('concentration', 'N/A') }} {{ chip_data.get('chip_health', 'N/A') }}
+{% endif %}
+
+{% set etf_data = data_persp.get('etf_structure', {}) %}
+{% if etf_data %}
+**ETF 结构**: 折溢价 {{ etf_data.get('premium_discount_pct', 'N/A') }}% | 跟踪误差 {{ etf_data.get('tracking_error', 'N/A') }} | 份额变动 {{ etf_data.get('share_change_pct', 'N/A') }} | 规模变动 {{ etf_data.get('aum_change_pct', 'N/A') }} | 流动性评分 {{ etf_data.get('liquidity_score', 'N/A') }} | 价差代理 {{ etf_data.get('spread_proxy', 'N/A') }}%
 {% endif %}
 {% endif %}
 

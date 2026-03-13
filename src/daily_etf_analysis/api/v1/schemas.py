@@ -52,6 +52,7 @@ class DailyReportResponse(BaseModel):
     symbol_results: list[dict[str, Any]]
     decision_quality: dict[str, Any]
     failures: list[dict[str, Any]]
+    global_summary_text: str | None = None
 
 
 class HistorySignalsResponse(BaseModel):

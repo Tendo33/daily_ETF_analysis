@@ -12,7 +12,8 @@ from daily_etf_analysis.contracts.analysis_contracts import build_daily_report_c
 from daily_etf_analysis.domain import AnalysisTask, TaskStatus
 from daily_etf_analysis.notifications import NotificationManager
 from daily_etf_analysis.reports import render_daily_report_markdown
-from daily_etf_analysis.services import AnalysisService, build_market_review
+from daily_etf_analysis.services import AnalysisService
+from daily_etf_analysis.services.global_summary import build_global_summary_text
 
 SKIPPED_STATUS = "skipped"
 
@@ -181,13 +182,10 @@ def run_daily_analysis(
             symbols=selected_symbols,
             limit=service.settings.report_history_compare_n,
         )
-    market_review = build_market_review(
-        report_rows,
-        industry_map=service.settings.industry_map,
-        history_by_symbol=history_by_symbol,
-        trend_window_days=service.settings.industry_trend_window_days,
-        risk_top_n=service.settings.industry_risk_top_n,
-        recommend_weights=service.settings.industry_recommend_weights,
+    global_summary_text = build_global_summary_text(
+        report_rows=report_rows,
+        report_date=report_date,
+        settings=service.settings,
     )
     failures = [
         {
@@ -230,8 +228,8 @@ def run_daily_analysis(
             "market": report_market,
             "symbols": selected_symbols,
             "report_rows": report_rows,
-            "market_review": market_review,
             "history_by_symbol": history_by_symbol,
+            "global_summary_text": global_summary_text,
             "run_summary": run_summary,
             "symbol_results": symbol_results,
             "decision_quality": decision_quality,
@@ -244,8 +242,8 @@ def run_daily_analysis(
         report_date=report_date,
         market=report_market,
         report_rows=report_rows,
-        market_review=market_review,
         history_by_symbol=history_by_symbol,
+        global_summary_text=global_summary_text,
     )
     markdown_path = _write_markdown_report(
         output_dir=output_dir,
@@ -489,8 +487,8 @@ def _build_markdown_summary(
     report_rows: list[dict[str, Any]],
     notes: str | None = None,
     skip_reason: str | None = None,
-    market_review: dict[str, Any] | None = None,
     history_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
+    global_summary_text: str | None = None,
 ) -> str:
     return render_daily_report_markdown(
         task_id=task_id,
@@ -501,8 +499,8 @@ def _build_markdown_summary(
         disclaimer="For research only; not investment advice.",
         notes=notes,
         skip_reason=skip_reason,
-        market_review=market_review,
         history_by_symbol=history_by_symbol,
+        global_summary_text=global_summary_text,
     )
 
 

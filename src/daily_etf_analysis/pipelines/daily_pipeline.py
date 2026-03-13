@@ -47,6 +47,13 @@ class DailyPipeline:
         self.fetcher_manager = fetcher_manager or DataFetcherManager(self.settings)
         self.news_manager = news_manager or NewsProviderManager(self.settings)
         self.analyzer = analyzer or EtfAnalyzer(self.settings)
+        from daily_etf_analysis.services.theme_intel_aggregator import (
+            ThemeIntelligenceAggregator,
+        )
+
+        self.theme_aggregator = ThemeIntelligenceAggregator(
+            self.settings, self.news_manager
+        )
         self._sync_static_configs()
 
     def _sync_static_configs(self) -> None:
@@ -74,6 +81,40 @@ class DailyPipeline:
         if market.value == "INDEX":
             return code
         return ""
+
+    def _load_benchmark_bars(
+        self, symbol: str, benchmark_index: str, days: int = 60
+    ) -> list[EtfDailyBar] | None:
+        if not benchmark_index:
+            return None
+        if not hasattr(self.repository, "get_index_proxy_symbols"):
+            return None
+        proxy_symbols = self.repository.get_index_proxy_symbols(benchmark_index)
+        proxy_symbol = next(
+            (
+                normalize_symbol(item)
+                for item in proxy_symbols
+                if normalize_symbol(item) != normalize_symbol(symbol)
+            ),
+            None,
+        )
+        if not proxy_symbol:
+            return None
+        if not hasattr(self.repository, "get_recent_bars"):
+            return None
+        bars = self.repository.get_recent_bars(proxy_symbol, days=days)
+        if bars:
+            return bars
+        try:
+            fetched, _ = self.fetcher_manager.get_daily_bars(
+                symbol=proxy_symbol, days=days
+            )
+            if fetched:
+                self.repository.save_daily_bars(fetched)
+                return fetched
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Benchmark proxy fetch failed for %s: %s", proxy_symbol, exc)
+        return None
 
     def run(
         self,
@@ -125,6 +166,27 @@ class DailyPipeline:
                     bars=bars, quote=quote, factors=factors
                 )
                 benchmark = self._benchmark_from_mapping(symbol) or code
+                theme_tags = _resolve_theme_tags(
+                    symbol=symbol,
+                    theme_map=self.settings.etf_theme_map,
+                    industry_map=self.settings.industry_map,
+                )
+                benchmark_bars = self._load_benchmark_bars(symbol, benchmark)
+                from daily_etf_analysis.services.etf_features import (  # noqa: I001
+                    compute_etf_features,
+                )
+
+                etf_features = compute_etf_features(
+                    bars=bars,
+                    quote=quote,
+                    benchmark_bars=benchmark_bars,
+                    theme_tags=theme_tags,
+                )
+                theme_intel = self.theme_aggregator.build(
+                    symbol=symbol,
+                    theme_tags=theme_tags,
+                    benchmark_index=benchmark,
+                )
                 news, provider_name = self.news_manager.search(
                     query=f"{benchmark} ETF market outlook",
                     max_results=5,
@@ -137,6 +199,9 @@ class DailyPipeline:
                     benchmark_index=benchmark,
                     factors={
                         **factors,
+                        "etf_features": etf_features,
+                        "theme_tags": theme_tags,
+                        "theme_intel": theme_intel,
                         "news_provider": provider_name,
                         "force_refresh": force_refresh,
                     },
@@ -178,6 +243,8 @@ class DailyPipeline:
                         news_provider=provider_name,
                         market_snapshot=market_snapshot,
                         llm_payload=result.llm_payload,
+                        etf_features=etf_features,
+                        theme_intel=theme_intel,
                     ),
                     news_items=context.news_items,
                 )
@@ -204,6 +271,8 @@ class DailyPipeline:
                         news_provider=None,
                         market_snapshot={},
                         llm_payload={},
+                        etf_features={},
+                        theme_intel={},
                     ),
                     news_items=[],
                 )
@@ -225,6 +294,8 @@ def _build_context_snapshot(
     news_provider: str | None,
     market_snapshot: dict[str, object] | None = None,
     llm_payload: dict[str, object] | None = None,
+    etf_features: dict[str, object] | None = None,
+    theme_intel: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "symbol": symbol,
@@ -234,6 +305,8 @@ def _build_context_snapshot(
         "news_provider": news_provider,
         "market_snapshot": market_snapshot or {},
         "llm_payload": llm_payload or {},
+        "etf_features": etf_features or {},
+        "theme_intel": theme_intel or {},
     }
 
 
@@ -285,3 +358,16 @@ def _pct_change(start: float | None, end: float | None) -> float | None:
     if start is None or end is None or start == 0:
         return None
     return (end - start) / start * 100
+
+
+def _resolve_theme_tags(
+    *, symbol: str, theme_map: dict[str, list[str]], industry_map: dict[str, list[str]]
+) -> list[str]:
+    normalized = normalize_symbol(symbol)
+    tags = [str(tag) for tag in theme_map.get(normalized, [])]
+    if tags:
+        return tags
+    for industry, symbols in industry_map.items():
+        if normalized in [normalize_symbol(item) for item in symbols]:
+            tags.append(str(industry))
+    return tags

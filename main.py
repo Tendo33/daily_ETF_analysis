@@ -16,7 +16,7 @@ from daily_etf_analysis.notifications import NotificationManager
 from daily_etf_analysis.observability.log_config import get_default_logger
 from daily_etf_analysis.reports import render_daily_report_markdown
 from daily_etf_analysis.scheduler import EtfScheduler
-from daily_etf_analysis.services import AnalysisService, build_market_review
+from daily_etf_analysis.services import AnalysisService
 
 logger = get_default_logger()
 
@@ -26,11 +26,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--schedule", action="store_true", help="Enable scheduler")
     parser.add_argument("--serve", action="store_true", help="Run API server")
     parser.add_argument("--serve-only", action="store_true", help="Run API server only")
-    parser.add_argument(
-        "--market-review",
-        action="store_true",
-        help="Run market review only",
-    )
     parser.add_argument(
         "--no-notify",
         action="store_true",
@@ -70,44 +65,6 @@ def _send_skip_notification(
     logger.info(f"Skip notification sent={result.sent} reason={result.reason}")
 
 
-def _run_market_review(
-    *,
-    service: AnalysisService,
-    notifier: NotificationManager,
-    market: str,
-    skip_notify: bool,
-) -> None:
-    report_date = date.today()
-    report_rows = service.get_daily_report(report_date, market=market)
-    history_by_symbol = {}
-    if service.settings.report_history_compare_n > 0:
-        history_by_symbol = service.get_recent_signals(
-            symbols=_resolve_symbols(service.settings, market),
-            limit=service.settings.report_history_compare_n,
-        )
-    market_review = build_market_review(
-        report_rows,
-        industry_map=service.settings.industry_map,
-        history_by_symbol=history_by_symbol,
-        trend_window_days=service.settings.industry_trend_window_days,
-        risk_top_n=service.settings.industry_risk_top_n,
-        recommend_weights=service.settings.industry_recommend_weights,
-    )
-    markdown = render_daily_report_markdown(
-        task_id="market-review",
-        status="completed" if report_rows else "skipped",
-        report_date=report_date,
-        market=market,
-        report_rows=report_rows,
-        disclaimer="For research only; not investment advice.",
-        market_review=market_review,
-        history_by_symbol=history_by_symbol,
-        notes="No report rows available" if not report_rows else None,
-    )
-    if skip_notify:
-        logger.info("Market review generated but notifications are disabled")
-        return
-    notifier.send_markdown(title="daily_ETF_analysis", markdown=markdown)
 
 
 def _start_api(host: str, port: int) -> None:
@@ -124,15 +81,6 @@ def main() -> int:
     settings = get_settings()
     service = AnalysisService(settings)
     notifier = NotificationManager(settings)
-
-    if args.market_review:
-        _run_market_review(
-            service=service,
-            notifier=notifier,
-            market="cn",
-            skip_notify=bool(args.no_notify),
-        )
-        return 0
 
     scheduler_requested = args.schedule or settings.schedule_enabled
     if scheduler_requested:

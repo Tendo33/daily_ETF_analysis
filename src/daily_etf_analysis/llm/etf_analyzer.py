@@ -61,6 +61,13 @@ class EtfAnalyzer:
 - 强势趋势 ETF（多头排列且趋势强度高、量能配合）可适当放宽乖离率要求
 - 仍需设置止损，不盲目追高
 
+### 7. ETF 专属指标优先级
+- 输入中 `etf_features` 包含折溢价、跟踪误差、流动性等信息，需优先参考
+- 折溢价明显偏高：提高风险警示，降低信心
+- 跟踪误差扩大：下调置信度
+- 份额/规模持续增长：情绪偏正面
+- 若 `theme_intel` 给出主题情报，需在情绪与风险中体现
+
 ## 输出格式：决策仪表盘 JSON
 
 请严格按照以下 JSON 格式输出，这是一个完整的【决策仪表盘】：
@@ -224,11 +231,17 @@ class EtfAnalyzer:
             f"- {item.get('title', '')}: {item.get('snippet', '')}"
             for item in context.news_items[:5]
         )
+        etf_features = context.factors.get("etf_features", {})
+        theme_tags = context.factors.get("theme_tags", [])
+        theme_intel = context.factors.get("theme_intel", {})
         return (
             f"Symbol: {context.symbol}\n"
             f"Market: {context.market.value}\n"
             f"Code: {context.code}\n"
             f"Benchmark Index: {context.benchmark_index}\n"
+            f"Theme Tags: {json.dumps(theme_tags, ensure_ascii=False)}\n"
+            f"ETF Features: {json.dumps(etf_features, ensure_ascii=False)}\n"
+            f"Theme Intel: {json.dumps(theme_intel, ensure_ascii=False)}\n"
             f"Factors JSON:\n{json.dumps(context.factors, ensure_ascii=False)}\n"
             f"News:\n{news_text or '- no recent news'}\n"
             "Provide ETF decision JSON."

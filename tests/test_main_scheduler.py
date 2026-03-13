@@ -36,7 +36,6 @@ def test_main_schedule_flag_forces_enable(monkeypatch) -> None:  # type: ignore[
         schedule=True,
         serve=False,
         serve_only=False,
-        market_review=False,
         no_notify=True,
         force_run=False,
         host="0.0.0.0",

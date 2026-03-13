@@ -57,6 +57,8 @@ print(settings.database_url)
 - `REPORT_SUMMARY_ONLY`：仅输出摘要（默认 false）
 - `FEISHU_MAX_BYTES`：飞书单条消息最大字节数（默认 20000）
 - `WEBHOOK_VERIFY_SSL`：Webhook HTTPS 校验（默认 true）
+- `THEME_INTEL_ENABLED`：是否启用 ETF 主题情报聚合（默认 true）
+- `ETF_THEME_MAP`：ETF→主题 JSON 映射（例如 `{"CN:159392":["航空航天","低空经济"]}`）
 
 ## 配置优先级 / Priority
 

@@ -63,3 +63,19 @@ def test_report_type_alias(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("REPORT_TYPE", "brief")
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.report_type == "brief"
+
+
+def test_theme_intel_enabled_flag(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("THEME_INTEL_ENABLED", "false")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.theme_intel_enabled is False
+
+
+def test_etf_theme_map_parsing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv(
+        "ETF_THEME_MAP",
+        '{"CN:159392":["航空航天","低空经济"],"US:QQQ":["纳斯达克"]}',
+    )
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.etf_theme_map["CN:159392"] == ["航空航天", "低空经济"]
+    assert settings.etf_theme_map["US:QQQ"] == ["纳斯达克"]

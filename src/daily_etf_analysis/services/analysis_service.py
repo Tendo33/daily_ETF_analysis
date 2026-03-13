@@ -29,6 +29,7 @@ from daily_etf_analysis.pipelines.daily_pipeline import DailyPipeline
 from daily_etf_analysis.repositories import EtfRepository
 from daily_etf_analysis.repositories.schema_guard import ensure_schema_ready
 from daily_etf_analysis.services.data_lifecycle_service import DataLifecycleService
+from daily_etf_analysis.services.global_summary import build_global_summary_text
 from daily_etf_analysis.services.system_config_service import SystemConfigService
 from daily_etf_analysis.services.task_manager import TaskManager
 
@@ -323,13 +324,17 @@ class AnalysisService:
         failures = []
         if run_id:
             failures = self.repository.list_failures_by_run(run_id)
-        return build_daily_report_contract(
+        contract = build_daily_report_contract(
             target_date=target_date,
             market=market,
             report_rows=rows,
             run_id=run_id,
             failures=failures,
         )
+        contract["global_summary_text"] = build_global_summary_text(
+            report_rows=rows, report_date=target_date, settings=self.settings
+        )
+        return contract
 
     def get_recent_signals(
         self, symbols: list[str], limit: int

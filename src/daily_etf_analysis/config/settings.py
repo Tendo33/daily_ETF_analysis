@@ -43,6 +43,9 @@ class Settings(BaseSettings):
         }
     )
     industry_map: dict[str, list[str]] = Field(default_factory=dict)
+    etf_theme_map: dict[str, list[str]] = Field(
+        default_factory=dict, validation_alias=AliasChoices("ETF_THEME_MAP")
+    )
     markets_enabled: CsvList = Field(default_factory=lambda: ["cn", "hk", "us"])
     database_url: str = Field(default="sqlite:///./data/daily_etf_analysis.db")
 
@@ -107,6 +110,9 @@ class Settings(BaseSettings):
     )
     report_integrity_enabled: bool = Field(default=True)
     report_history_compare_n: int = Field(default=0, ge=0, le=60)
+    theme_intel_enabled: bool = Field(
+        default=True, validation_alias=AliasChoices("THEME_INTEL_ENABLED")
+    )
     markdown_to_image_channels: CsvList = Field(default_factory=list)
     markdown_to_image_max_chars: int = Field(default=15000, ge=1000, le=50000)
     md2img_engine: str = Field(default="imgkit")
@@ -263,6 +269,26 @@ class Settings(BaseSettings):
                 for k, v in parsed.items()
             }
         raise ValueError("Invalid INDUSTRY_MAP value")
+
+    @field_validator("etf_theme_map", mode="before")
+    @classmethod
+    def parse_etf_theme_map(cls, value: Any) -> dict[str, list[str]]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {str(k).upper(): [str(x) for x in v] for k, v in value.items()}
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return {}
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise ValueError("ETF_THEME_MAP must be a JSON object")
+            return {
+                str(k).upper(): [str(x) for x in (v if isinstance(v, list) else [])]
+                for k, v in parsed.items()
+            }
+        raise ValueError("Invalid ETF_THEME_MAP value")
 
     @field_validator("industry_recommend_weights", mode="before")
     @classmethod
