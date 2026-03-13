@@ -1,5 +1,7 @@
 ﻿# daily_ETF_analysis
 
+![Daily ETF Analysis Banner](assets/banner.png)
+
 [English README](README.md)
 
 `daily_ETF_analysis` 是一个面向 A 股 / 港股 / 美股 ETF 的生产化智能分析服务。

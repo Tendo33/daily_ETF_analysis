@@ -1,5 +1,7 @@
 ﻿# daily_ETF_analysis
 
+![Daily ETF Analysis Banner](assets/banner.png)
+
 [中文文档](README_CN.md)
 
 `daily_ETF_analysis` is a production-oriented ETF analysis service for CN/HK/US markets.
