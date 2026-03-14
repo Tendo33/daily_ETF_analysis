@@ -7,13 +7,142 @@
 `daily_ETF_analysis` is a production-oriented ETF analysis service for CN/HK/US markets.
 It focuses on stable, structured outputs (scores, trend/action signals, confidence, risk alerts, run contracts), not only free-form text.
 
+## Quick Start
+
+### 0. Fork / Clone (recommended for your own usage)
+
+If you plan to customize or run your own copy, fork first and work from your fork:
+
+```bash
+git clone <your-fork-url>
+cd daily_ETF_analysis
+git remote add upstream <upstream-repo-url>
+git checkout -b feature/your-change
+```
+
+If you only want to try locally, cloning the upstream repo directly is also fine.
+
+### 1. Run with GitHub Actions (CI recommended)
+
+This project is designed to run via GitHub Actions. After forking:
+
+1. Enable Actions in your fork (GitHub → `Actions` → enable workflows).
+2. Configure repository **Secrets** (Settings → Secrets and variables → Actions → Secrets).
+
+Required:
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `OPENAI_MODEL` | LLM model name | `gpt-4o-mini` |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | `sk-xxxx` |
+| `OPENAI_API_KEYS` | Multiple API keys (comma-separated) | `sk-1,sk-2` |
+
+Set at least one of `OPENAI_API_KEY` or `OPENAI_API_KEYS`.
+
+Optional:
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com` |
+| `ETF_LIST` | Target ETF list | `CN:159659,CN:159740,CN:159392` |
+| `INDEX_PROXY_MAP` | Index → ETF proxy mapping (JSON) | `{"NDX":["US:QQQ","CN:159659"],"SPX":["US:SPY","CN:513500"],"HSI":["HK:02800","CN:159920"]}` |
+| `MARKETS_ENABLED` | Enabled markets | `cn,hk,us` |
+| `REALTIME_SOURCE_PRIORITY` | Realtime source priority | `efinance,akshare,tushare,pytdx,baostock,yfinance` |
+| `PYTDX_HOST` | PyTDX host | `119.147.212.81` |
+| `PYTDX_PORT` | PyTDX port | `7709` |
+| `TAVILY_API_KEYS` | Tavily API keys for news | `tvly-xxxx` |
+| `FEISHU_WEBHOOK_URL` | Feishu webhook for notifications | `https://open.feishu.cn/....` |
+| `TUSHARE_TOKEN` | Tushare token for CN realtime | `your-token` |
+
+3. Run manually: GitHub → `Actions` → `Daily ETF Analysis` → `Run workflow`.
+4. Scheduled runs are defined in `.github/workflows/daily_etf_analysis.yml`.
+
+Artifacts (reports/logs) are uploaded to the workflow run for download.
+
+### 2. Prerequisites (local run, optional)
+
+- Python `>=3.11`
+- [uv](https://docs.astral.sh/uv/)
+- Network access to your configured providers/LLM endpoints
+
+### 3. Install dependencies
+
+```bash
+uv sync --all-extras
+```
+
+### 4. Create local env file
+
+```bash
+cp .env.example .env
+```
+
+### 5. Configuration checklist
+
+Minimum required (basic run):
+
+```env
+ETF_LIST=CN:159659,US:QQQ,HK:02800
+DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
+```
+
+Recommended for high-quality output:
+
+```env
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-xxxx
+# OPENAI_BASE_URL=https://api.openai.com
+TAVILY_API_KEYS=tvly-xxxx
+# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
+```
+
+Optional by scenario (see `.env.example` for the full list):
+
+- CN realtime providers: `TUSHARE_TOKEN`, `PYTDX_HOST`, `PYTDX_PORT`
+- Scheduler: `SCHEDULE_ENABLED`, `SCHEDULE_CRON_CN/HK/US`
+- Notifications: `NOTIFY_CHANNELS`, `FEISHU_WEBHOOK_URL`, `WECHAT_WEBHOOK_URL`, `TELEGRAM_*`, `EMAIL_*`
+- API auth: `API_AUTH_ENABLED`, `API_ADMIN_TOKEN`
+- Report rendering: `REPORT_RENDERER_ENABLED`, `REPORT_TEMPLATES_DIR`
+
+### 6. Initialize database (first run)
+
+```bash
+uv run alembic upgrade head
+```
+
+### 7. Start API server
+
+```bash
+uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
+```
+
+### 8. Verify health
+
+```bash
+curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/metrics
+```
+
+### 9. Trigger one analysis run
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"]}'
+```
+
+OpenAPI docs:
+
+- `http://127.0.0.1:8000/docs`
+- `http://127.0.0.1:8000/redoc`
+
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Core Features](#core-features)
-3. [Architecture](#architecture)
-4. [Project Layout](#project-layout)
-5. [Quick Start](#quick-start)
+1. [Quick Start](#quick-start)
+2. [Overview](#overview)
+3. [Core Features](#core-features)
+4. [Architecture](#architecture)
+5. [Project Layout](#project-layout)
 6. [Run Modes](#run-modes)
 7. [Configuration](#configuration)
 8. [API Guide](#api-guide)
@@ -106,71 +235,6 @@ examples/               # Small usage examples
 tests/                  # Unit/integration/contract tests
 ```
 
-## Quick Start
-
-### 1. Prerequisites
-
-- Python `>=3.11`
-- [uv](https://docs.astral.sh/uv/)
-- Network access to your configured providers/LLM endpoints
-
-### 2. Install dependencies
-
-```bash
-uv sync --all-extras
-```
-
-### 3. Create local env file
-
-```bash
-cp .env.example .env
-```
-
-### 4. Minimal configuration
-
-At minimum, set your target ETF list and DB path (defaults are already provided):
-
-```env
-ETF_LIST=CN:159659,US:QQQ,HK:02800
-DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
-```
-
-For full-quality output (recommended), configure LLM + news:
-
-```env
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_API_KEY=sk-xxxx
-# OPENAI_BASE_URL=https://api.openai.com
-TAVILY_API_KEYS=tvly-xxxx
-# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
-```
-
-### 5. Start API server
-
-```bash
-uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
-```
-
-### 6. Verify health
-
-```bash
-curl http://127.0.0.1:8000/api/health
-curl http://127.0.0.1:8000/api/metrics
-```
-
-### 7. Trigger one analysis run
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"]}'
-```
-
-OpenAPI docs:
-
-- `http://127.0.0.1:8000/docs`
-- `http://127.0.0.1:8000/redoc`
-
 ## Run Modes
 
 ### API only
@@ -223,27 +287,134 @@ All config is loaded via `pydantic-settings` from:
 2. `.env`
 3. defaults in code
 
-### Key configuration groups
+### Required variables
 
-- Universe and mappings
-  - `ETF_LIST`, `INDEX_PROXY_MAP`, `MARKETS_ENABLED`
-- Data source priority and resilience
-  - `REALTIME_SOURCE_PRIORITY`
-  - `PROVIDER_MAX_RETRIES`, `PROVIDER_BACKOFF_MS`, `PROVIDER_CIRCUIT_FAIL_THRESHOLD`, `PROVIDER_CIRCUIT_RESET_SECONDS`
-- LLM (OpenAI-compatible only)
-  - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
-- News
-  - `TAVILY_API_KEYS`, `TAVILY_BASE_URL`, `NEWS_MAX_AGE_DAYS`, `NEWS_PROVIDER_PRIORITY`
-- Notifications
-  - `NOTIFY_CHANNELS`, `FEISHU_WEBHOOK_URL`, `WECHAT_WEBHOOK_URL`, `TELEGRAM_*`, `EMAIL_*`
-- Runtime and reliability
-  - `TASK_MAX_CONCURRENCY`, `TASK_TIMEOUT_SECONDS`
-- Retention / lifecycle
-  - `RETENTION_TASK_DAYS`, `RETENTION_REPORT_DAYS`, `RETENTION_QUOTE_DAYS`
-- API auth
-  - `API_AUTH_ENABLED`, `API_ADMIN_TOKEN`
-- Scheduler
-  - `SCHEDULE_ENABLED`, `SCHEDULE_CRON_CN/HK/US`
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `ETF_LIST` | Target ETF list | `CN:159659,CN:159740,CN:159392` |
+| `DATABASE_URL` | Database connection string | `sqlite:///./data/daily_etf_analysis.db` |
+| `OPENAI_MODEL` | LLM model name | `gpt-4o-mini` |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | `sk-xxxx` |
+| `OPENAI_API_KEYS` | Multiple API keys (comma-separated) | `sk-1,sk-2` |
+
+Set at least one of `OPENAI_API_KEY` or `OPENAI_API_KEYS`.
+
+### Optional variables
+
+**Runtime & logging**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `ENVIRONMENT` | Runtime environment | `development` / `production` |
+| `LOG_LEVEL` | Log level | `DEBUG` / `INFO` / `WARN` / `ERROR` |
+| `LOG_FILE` | Log file path | `logs/app.log` |
+
+**Universe & mappings**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `INDEX_PROXY_MAP` | Index → ETF proxy mapping (JSON) | `{"NDX":["US:QQQ","CN:159659"],"SPX":["US:SPY","CN:513500"],"HSI":["HK:02800","CN:159920"]}` |
+| `INDUSTRY_MAP` | Industry mapping (JSON) | `{}` |
+| `MARKETS_ENABLED` | Enabled markets | `cn,hk,us` |
+| `DISABLE_SCHEMA_GUARD` | Disable schema guard (local only) | `1` to disable |
+
+**Theme intelligence**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `THEME_INTEL_ENABLED` | Enable theme intelligence | `true` / `false` |
+| `ETF_THEME_MAP` | ETF theme tags (JSON) | `{"CN:159392":["航空航天","低空经济"]}` |
+
+**Market data providers**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `REALTIME_SOURCE_PRIORITY` | Realtime source priority | `efinance,akshare,tushare,pytdx,baostock,yfinance` |
+| `TUSHARE_TOKEN` | Tushare token | `your-token` |
+| `PYTDX_HOST` | PyTDX host | `119.147.212.81` |
+| `PYTDX_PORT` | PyTDX port | `7709` |
+
+**Provider resilience**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `PROVIDER_MAX_RETRIES` | Max retries | `1` |
+| `PROVIDER_BACKOFF_MS` | Backoff (ms) | `200` |
+| `PROVIDER_CIRCUIT_FAIL_THRESHOLD` | Circuit breaker threshold | `3` |
+| `PROVIDER_CIRCUIT_RESET_SECONDS` | Circuit reset seconds | `60` |
+
+**LLM parameters**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com` |
+| `LLM_TEMPERATURE` | Sampling temperature | `0.7` |
+| `LLM_MAX_TOKENS` | Max output tokens | `8192` |
+| `LLM_TIMEOUT_SECONDS` | Request timeout seconds | `120` |
+
+**News**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `TAVILY_API_KEYS` | Tavily API keys | `tvly-xxxx` |
+| `TAVILY_BASE_URL` | Tavily base URL | `https://tavily.ivanli.cc/api/tavily` |
+| `NEWS_MAX_AGE_DAYS` | Max news age (days) | `3` |
+| `NEWS_PROVIDER_PRIORITY` | News provider priority | `tavily` |
+
+**Scheduler**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `SCHEDULE_ENABLED` | Enable scheduler | `true` / `false` |
+| `SCHEDULE_CRON_CN` | CN cron (sec min hour day month weekday) | `0 30 15 * * 1-5` |
+| `SCHEDULE_CRON_HK` | HK cron (sec min hour day month weekday) | `0 10 16 * * 1-5` |
+| `SCHEDULE_CRON_US` | US cron (sec min hour day month weekday) | `0 10 22 * * 1-5` |
+
+**Notifications & reports**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `NOTIFY_CHANNELS` | Notification channels | `feishu,telegram,email` |
+| `FEISHU_WEBHOOK_URL` | Feishu webhook | `https://open.feishu.cn/....` |
+| `WECHAT_WEBHOOK_URL` | WeChat webhook | `https://qyapi.weixin.qq.com/....` |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token | `123456:ABCDEF` |
+| `TELEGRAM_CHAT_ID` | Telegram chat id | `-1001234567890` |
+| `EMAIL_SMTP_HOST` | SMTP host | `smtp.example.com` |
+| `EMAIL_SMTP_PORT` | SMTP port | `25` |
+| `EMAIL_USERNAME` | SMTP username | `user@example.com` |
+| `EMAIL_PASSWORD` | SMTP password | `your-password` |
+| `EMAIL_FROM` | Email from address | `noreply@example.com` |
+| `EMAIL_TO` | Email to list (comma-separated) | `a@example.com,b@example.com` |
+| `REPORT_TEMPLATES_DIR` | Report templates dir | `templates` |
+| `REPORT_RENDERER_ENABLED` | Enable report renderer | `true` / `false` |
+| `REPORT_INTEGRITY_ENABLED` | Enable report integrity check | `true` / `false` |
+| `REPORT_HISTORY_COMPARE_N` | History compare count | `0` |
+| `MARKDOWN_TO_IMAGE_CHANNELS` | Markdown-to-image channels | `feishu,telegram` |
+| `MARKDOWN_TO_IMAGE_MAX_CHARS` | Markdown-to-image max chars | `15000` |
+| `MD2IMG_ENGINE` | Markdown-to-image engine | `imgkit` |
+| `METRICS_ENABLED` | Enable metrics | `true` / `false` |
+
+**Task reliability & retention**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `TASK_MAX_CONCURRENCY` | Max task concurrency | `2` |
+| `TASK_QUEUE_MAX_SIZE` | Task queue max size | `50` |
+| `TASK_TIMEOUT_SECONDS` | Task timeout seconds | `120` |
+| `TASK_DEDUP_WINDOW_SECONDS` | Task dedup window seconds | `300` |
+| `RETENTION_TASK_DAYS` | Retain tasks (days) | `30` |
+| `RETENTION_REPORT_DAYS` | Retain reports (days) | `60` |
+| `RETENTION_QUOTE_DAYS` | Retain quotes (days) | `14` |
+| `INDUSTRY_TREND_WINDOW_DAYS` | Industry trend window (days) | `5` |
+| `INDUSTRY_RISK_TOP_N` | Industry risk top N | `3` |
+| `INDUSTRY_RECOMMEND_WEIGHTS` | Industry recommend weights (JSON) | `{"buy":1,"hold":0,"sell":-1,"score_weight":0.5}` |
+
+**API auth**
+
+| Variable | Description | Options / Example |
+| --- | --- | --- |
+| `API_AUTH_ENABLED` | Enable API auth | `true` / `false` |
+| `API_ADMIN_TOKEN` | Admin token | `strong-random-token` |
 
 ### Auth behavior
 

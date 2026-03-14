@@ -69,9 +69,9 @@ jobs:
 
       - name: Config probe (no secrets)
         env:
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
@@ -85,17 +85,17 @@ jobs:
 
       - name: Run daily analysis smoke
         env:
-          ETF_LIST: ${{ vars.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
-          INDEX_PROXY_MAP: ${{ vars.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
-          MARKETS_ENABLED: ${{ vars.MARKETS_ENABLED || 'cn,hk,us' }}
+          ETF_LIST: ${{ secrets.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
+          INDEX_PROXY_MAP: ${{ secrets.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
+          MARKETS_ENABLED: ${{ secrets.MARKETS_ENABLED || 'cn,hk,us' }}
           DATABASE_URL: sqlite:///./data/daily_etf_analysis.db
-          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
+          REALTIME_SOURCE_PRIORITY: ${{ secrets.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
-          PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          PYTDX_HOST: ${{ secrets.PYTDX_HOST || '119.147.212.81' }}
+          PYTDX_PORT: ${{ secrets.PYTDX_PORT || '7709' }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
         run: |
           uv run python scripts/run_daily_analysis.py \
@@ -106,17 +106,17 @@ jobs:
 
       - name: Run daily analysis
         env:
-          ETF_LIST: ${{ vars.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
-          INDEX_PROXY_MAP: ${{ vars.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
-          MARKETS_ENABLED: ${{ vars.MARKETS_ENABLED || 'cn,hk,us' }}
+          ETF_LIST: ${{ secrets.ETF_LIST || 'CN:159659,US:QQQ,HK:02800' }}
+          INDEX_PROXY_MAP: ${{ secrets.INDEX_PROXY_MAP || '{"NDX":["US:QQQ","CN:159659"],"HSI":["HK:02800","CN:159920"]}' }}
+          MARKETS_ENABLED: ${{ secrets.MARKETS_ENABLED || 'cn,hk,us' }}
           DATABASE_URL: sqlite:///./data/daily_etf_analysis.db
-          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
+          REALTIME_SOURCE_PRIORITY: ${{ secrets.REALTIME_SOURCE_PRIORITY || 'efinance,akshare,tushare,pytdx,baostock,yfinance' }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          PYTDX_HOST: ${{ vars.PYTDX_HOST || '119.147.212.81' }}
-          PYTDX_PORT: ${{ vars.PYTDX_PORT || '7709' }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          PYTDX_HOST: ${{ secrets.PYTDX_HOST || '119.147.212.81' }}
+          PYTDX_PORT: ${{ secrets.PYTDX_PORT || '7709' }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FORCE_RUN_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_run || 'false' }}

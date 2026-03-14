@@ -7,13 +7,142 @@
 `daily_ETF_analysis` 是一个面向 A 股 / 港股 / 美股 ETF 的生产化智能分析服务。
 核心目标是稳定输出结构化结果（信号、评分、风控、可追踪 run 合约），而不是只生成一段自然语言文案。
 
+## 快速开始
+
+### 0. Fork / Clone（推荐用于自己长期使用）
+
+如果你打算自定义或长期使用，建议先 fork 并从自己的仓库开始：
+
+```bash
+git clone <your-fork-url>
+cd daily_ETF_analysis
+git remote add upstream <upstream-repo-url>
+git checkout -b feature/your-change
+```
+
+如果只是本地试跑，直接克隆上游仓库也可以。
+
+### 1. 通过 GitHub Actions 运行（推荐 CI）
+
+该项目设计为通过 GitHub Actions 执行。Fork 后请完成以下配置：
+
+1. 在 fork 仓库启用 Actions（GitHub → `Actions` → 启用工作流）。
+2. 配置仓库 **Secrets**（Settings → Secrets and variables → Actions → Secrets）：
+
+必填：
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `OPENAI_MODEL` | LLM 模型名称 | `gpt-4o-mini` |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | `sk-xxxx` |
+| `OPENAI_API_KEYS` | 多个 API key（逗号分隔） | `sk-1,sk-2` |
+
+`OPENAI_API_KEY` 与 `OPENAI_API_KEYS` 至少配置一个即可。
+
+可选：
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `OPENAI_BASE_URL` | OpenAI-compatible Base URL | `https://api.openai.com` |
+| `ETF_LIST` | ETF 标的列表 | `CN:159659,CN:159740,CN:159392` |
+| `INDEX_PROXY_MAP` | 指数 → ETF 代理映射（JSON） | `{"NDX":["US:QQQ","CN:159659"],"SPX":["US:SPY","CN:513500"],"HSI":["HK:02800","CN:159920"]}` |
+| `MARKETS_ENABLED` | 启用市场 | `cn,hk,us` |
+| `REALTIME_SOURCE_PRIORITY` | 行情源优先级 | `efinance,akshare,tushare,pytdx,baostock,yfinance` |
+| `PYTDX_HOST` | PyTDX 主机 | `119.147.212.81` |
+| `PYTDX_PORT` | PyTDX 端口 | `7709` |
+| `TAVILY_API_KEYS` | Tavily 新闻检索 key | `tvly-xxxx` |
+| `FEISHU_WEBHOOK_URL` | 飞书通知 Webhook | `https://open.feishu.cn/....` |
+| `TUSHARE_TOKEN` | Tushare Token（A 股实时） | `your-token` |
+
+3. 手动触发：GitHub → `Actions` → `Daily ETF Analysis` → `Run workflow`。
+4. 定时任务由 `.github/workflows/daily_etf_analysis.yml` 中的 schedule 控制。
+
+报告与日志会作为 artifacts 上传到该次 workflow 运行记录中。
+
+### 2. 环境要求（本地运行可选）
+
+- Python `>=3.11`
+- [uv](https://docs.astral.sh/uv/)
+- 能访问你配置的行情/LLM/新闻服务
+
+### 3. 安装依赖
+
+```bash
+uv sync --all-extras
+```
+
+### 4. 初始化环境变量
+
+```bash
+cp .env.example .env
+```
+
+### 5. 配置清单
+
+最小可运行配置：
+
+```env
+ETF_LIST=CN:159659,US:QQQ,HK:02800
+DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
+```
+
+建议补齐 LLM 与新闻配置获得更高质量输出：
+
+```env
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-xxxx
+# OPENAI_BASE_URL=https://api.openai.com
+TAVILY_API_KEYS=tvly-xxxx
+# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
+```
+
+按需配置（完整列表见 `.env.example`）：
+
+- A 股实时行情：`TUSHARE_TOKEN`、`PYTDX_HOST`、`PYTDX_PORT`
+- 定时调度：`SCHEDULE_ENABLED`、`SCHEDULE_CRON_CN/HK/US`
+- 通知渠道：`NOTIFY_CHANNELS`、`FEISHU_WEBHOOK_URL`、`WECHAT_WEBHOOK_URL`、`TELEGRAM_*`、`EMAIL_*`
+- API 鉴权：`API_AUTH_ENABLED`、`API_ADMIN_TOKEN`
+- 报告渲染：`REPORT_RENDERER_ENABLED`、`REPORT_TEMPLATES_DIR`
+
+### 6. 初始化数据库（首次运行）
+
+```bash
+uv run alembic upgrade head
+```
+
+### 7. 启动 API
+
+```bash
+uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
+```
+
+### 8. 健康检查
+
+```bash
+curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/metrics
+```
+
+### 9. 发起一次分析任务
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"]}'
+```
+
+OpenAPI 文档：
+
+- `http://127.0.0.1:8000/docs`
+- `http://127.0.0.1:8000/redoc`
+
 ## 目录
 
-1. [项目简介](#项目简介)
-2. [核心能力](#核心能力)
-3. [架构概览](#架构概览)
-4. [目录结构](#目录结构)
-5. [快速开始](#快速开始)
+1. [快速开始](#快速开始)
+2. [项目简介](#项目简介)
+3. [核心能力](#核心能力)
+4. [架构概览](#架构概览)
+5. [目录结构](#目录结构)
 6. [运行模式](#运行模式)
 7. [配置说明](#配置说明)
 8. [API 使用指南](#api-使用指南)
@@ -106,71 +235,6 @@ examples/               # 示例
 tests/                  # 单测/集成/契约测试
 ```
 
-## 快速开始
-
-### 1. 环境要求
-
-- Python `>=3.11`
-- [uv](https://docs.astral.sh/uv/)
-- 能访问你配置的行情/LLM/新闻服务
-
-### 2. 安装依赖
-
-```bash
-uv sync --all-extras
-```
-
-### 3. 初始化环境变量
-
-```bash
-cp .env.example .env
-```
-
-### 4. 最小配置
-
-即使只设置下列配置，也可以先跑通基础流程（默认值已提供）：
-
-```env
-ETF_LIST=CN:159659,US:QQQ,HK:02800
-DATABASE_URL=sqlite:///./data/daily_etf_analysis.db
-```
-
-建议补齐 LLM 与新闻配置获得高质量结果：
-
-```env
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_API_KEY=sk-xxxx
-# OPENAI_BASE_URL=https://api.openai.com
-TAVILY_API_KEYS=tvly-xxxx
-# TAVILY_BASE_URL=https://tavily.ivanli.cc/api/tavily
-```
-
-### 5. 启动 API
-
-```bash
-uv run uvicorn daily_etf_analysis.api.app:app --host 0.0.0.0 --port 8000
-```
-
-### 6. 健康检查
-
-```bash
-curl http://127.0.0.1:8000/api/health
-curl http://127.0.0.1:8000/api/metrics
-```
-
-### 7. 发起一次分析任务
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/analysis/runs \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["CN:159659","US:QQQ","HK:02800"]}'
-```
-
-OpenAPI 文档：
-
-- `http://127.0.0.1:8000/docs`
-- `http://127.0.0.1:8000/redoc`
-
 ## 运行模式
 
 ### 仅 API 服务
@@ -225,27 +289,134 @@ uv run python scripts/run_scheduler.py
 2. `.env`
 3. 代码默认值
 
-### 关键配置分组
+### 必填变量
 
-- 标的与映射
-  - `ETF_LIST`、`INDEX_PROXY_MAP`、`MARKETS_ENABLED`
-- 行情源与容灾参数
-  - `REALTIME_SOURCE_PRIORITY`
-  - `PROVIDER_MAX_RETRIES`、`PROVIDER_BACKOFF_MS`、`PROVIDER_CIRCUIT_FAIL_THRESHOLD`、`PROVIDER_CIRCUIT_RESET_SECONDS`
-- LLM（仅 OpenAI-compatible）
-  - `OPENAI_MODEL`, `OPENAI_API_KEY(S)`, `OPENAI_BASE_URL`
-- 新闻
-  - `TAVILY_API_KEYS`、`TAVILY_BASE_URL`、`NEWS_MAX_AGE_DAYS`、`NEWS_PROVIDER_PRIORITY`
-- 通知
-  - `NOTIFY_CHANNELS`、`FEISHU_WEBHOOK_URL`、`WECHAT_WEBHOOK_URL`、`TELEGRAM_*`、`EMAIL_*`
-- 运行可靠性
-  - `TASK_MAX_CONCURRENCY`、`TASK_TIMEOUT_SECONDS`
-- 留存清理
-  - `RETENTION_TASK_DAYS`、`RETENTION_REPORT_DAYS`、`RETENTION_QUOTE_DAYS`
-- API 鉴权
-  - `API_AUTH_ENABLED`、`API_ADMIN_TOKEN`
-- 调度
-  - `SCHEDULE_ENABLED`、`SCHEDULE_CRON_CN/HK/US`
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `ETF_LIST` | ETF 标的列表 | `CN:159659,CN:159740,CN:159392` |
+| `DATABASE_URL` | 数据库连接字符串 | `sqlite:///./data/daily_etf_analysis.db` |
+| `OPENAI_MODEL` | LLM 模型名称 | `gpt-4o-mini` |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | `sk-xxxx` |
+| `OPENAI_API_KEYS` | 多个 API key（逗号分隔） | `sk-1,sk-2` |
+
+`OPENAI_API_KEY` 与 `OPENAI_API_KEYS` 至少配置一个即可。
+
+### 可选变量
+
+**运行环境与日志**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `ENVIRONMENT` | 运行环境 | `development` / `production` |
+| `LOG_LEVEL` | 日志级别 | `DEBUG` / `INFO` / `WARN` / `ERROR` |
+| `LOG_FILE` | 日志文件路径 | `logs/app.log` |
+
+**标的与映射**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `INDEX_PROXY_MAP` | 指数 → ETF 代理映射（JSON） | `{"NDX":["US:QQQ","CN:159659"],"SPX":["US:SPY","CN:513500"],"HSI":["HK:02800","CN:159920"]}` |
+| `INDUSTRY_MAP` | 行业映射（JSON） | `{}` |
+| `MARKETS_ENABLED` | 启用市场 | `cn,hk,us` |
+| `DISABLE_SCHEMA_GUARD` | 禁用 schema guard（仅本地测试） | `1` 表示禁用 |
+
+**主题情报**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `THEME_INTEL_ENABLED` | 是否启用主题情报 | `true` / `false` |
+| `ETF_THEME_MAP` | ETF 主题映射（JSON） | `{"CN:159392":["航空航天","低空经济"]}` |
+
+**行情源配置**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `REALTIME_SOURCE_PRIORITY` | 实时行情源优先级 | `efinance,akshare,tushare,pytdx,baostock,yfinance` |
+| `TUSHARE_TOKEN` | Tushare Token | `your-token` |
+| `PYTDX_HOST` | PyTDX 主机 | `119.147.212.81` |
+| `PYTDX_PORT` | PyTDX 端口 | `7709` |
+
+**Provider 韧性参数**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `PROVIDER_MAX_RETRIES` | 最大重试次数 | `1` |
+| `PROVIDER_BACKOFF_MS` | 退避时间（毫秒） | `200` |
+| `PROVIDER_CIRCUIT_FAIL_THRESHOLD` | 熔断失败阈值 | `3` |
+| `PROVIDER_CIRCUIT_RESET_SECONDS` | 熔断重置时间（秒） | `60` |
+
+**LLM 参数**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `OPENAI_BASE_URL` | OpenAI-compatible Base URL | `https://api.openai.com` |
+| `LLM_TEMPERATURE` | 采样温度 | `0.7` |
+| `LLM_MAX_TOKENS` | 输出上限 | `8192` |
+| `LLM_TIMEOUT_SECONDS` | 请求超时秒数 | `120` |
+
+**新闻**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `TAVILY_API_KEYS` | Tavily API Keys | `tvly-xxxx` |
+| `TAVILY_BASE_URL` | Tavily Base URL | `https://tavily.ivanli.cc/api/tavily` |
+| `NEWS_MAX_AGE_DAYS` | 新闻最大天数 | `3` |
+| `NEWS_PROVIDER_PRIORITY` | 新闻提供方优先级 | `tavily` |
+
+**调度**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `SCHEDULE_ENABLED` | 是否启用调度 | `true` / `false` |
+| `SCHEDULE_CRON_CN` | A 股 Cron（秒 分 时 日 月 周） | `0 30 15 * * 1-5` |
+| `SCHEDULE_CRON_HK` | 港股 Cron（秒 分 时 日 月 周） | `0 10 16 * * 1-5` |
+| `SCHEDULE_CRON_US` | 美股 Cron（秒 分 时 日 月 周） | `0 10 22 * * 1-5` |
+
+**通知与报告**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `NOTIFY_CHANNELS` | 通知渠道列表 | `feishu,telegram,email` |
+| `FEISHU_WEBHOOK_URL` | 飞书 Webhook | `https://open.feishu.cn/....` |
+| `WECHAT_WEBHOOK_URL` | 企业微信 Webhook | `https://qyapi.weixin.qq.com/....` |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | `123456:ABCDEF` |
+| `TELEGRAM_CHAT_ID` | Telegram Chat ID | `-1001234567890` |
+| `EMAIL_SMTP_HOST` | SMTP 主机 | `smtp.example.com` |
+| `EMAIL_SMTP_PORT` | SMTP 端口 | `25` |
+| `EMAIL_USERNAME` | SMTP 用户名 | `user@example.com` |
+| `EMAIL_PASSWORD` | SMTP 密码 | `your-password` |
+| `EMAIL_FROM` | 发件人地址 | `noreply@example.com` |
+| `EMAIL_TO` | 收件人列表（逗号分隔） | `a@example.com,b@example.com` |
+| `REPORT_TEMPLATES_DIR` | 报告模板目录 | `templates` |
+| `REPORT_RENDERER_ENABLED` | 是否启用报告渲染 | `true` / `false` |
+| `REPORT_INTEGRITY_ENABLED` | 是否启用报告完整性校验 | `true` / `false` |
+| `REPORT_HISTORY_COMPARE_N` | 历史对比条数 | `0` |
+| `MARKDOWN_TO_IMAGE_CHANNELS` | Markdown 转图渠道 | `feishu,telegram` |
+| `MARKDOWN_TO_IMAGE_MAX_CHARS` | Markdown 转图最大字符数 | `15000` |
+| `MD2IMG_ENGINE` | Markdown 转图引擎 | `imgkit` |
+| `METRICS_ENABLED` | 是否启用指标上报 | `true` / `false` |
+
+**任务可靠性与留存**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `TASK_MAX_CONCURRENCY` | 任务最大并发数 | `2` |
+| `TASK_QUEUE_MAX_SIZE` | 任务队列最大长度 | `50` |
+| `TASK_TIMEOUT_SECONDS` | 单任务超时（秒） | `120` |
+| `TASK_DEDUP_WINDOW_SECONDS` | 任务去重窗口（秒） | `300` |
+| `RETENTION_TASK_DAYS` | 任务保留天数 | `30` |
+| `RETENTION_REPORT_DAYS` | 报告保留天数 | `60` |
+| `RETENTION_QUOTE_DAYS` | 行情保留天数 | `14` |
+| `INDUSTRY_TREND_WINDOW_DAYS` | 行业趋势窗口天数 | `5` |
+| `INDUSTRY_RISK_TOP_N` | 行业风险 Top N | `3` |
+| `INDUSTRY_RECOMMEND_WEIGHTS` | 行业推荐权重（JSON） | `{"buy":1,"hold":0,"sell":-1,"score_weight":0.5}` |
+
+**API 鉴权**
+
+| 变量名 | 解释 | 可选项 / 例子 |
+| --- | --- | --- |
+| `API_AUTH_ENABLED` | 是否启用 API 鉴权 | `true` / `false` |
+| `API_ADMIN_TOKEN` | 管理员 Token | `strong-random-token` |
 
 ### 鉴权行为
 
