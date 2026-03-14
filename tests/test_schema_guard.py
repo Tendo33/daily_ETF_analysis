@@ -48,9 +48,7 @@ def test_schema_guard_passes_when_revision_and_columns_present(
     assert result.ok is True
 
 
-def test_schema_guard_disabled_by_settings(
-    monkeypatch, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+def test_schema_guard_disabled_by_settings(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setenv("DISABLE_SCHEMA_GUARD", "true")
 

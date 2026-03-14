@@ -7,6 +7,25 @@
 {%- if val is not none and val != '' -%}{{ val }}{{ suffix }}{%- else -%}{{ fallback }}{%- endif -%}
 {%- endmacro -%}
 
+{%- macro position_suggestion(signal_text) -%}
+{%- set text = signal_text or '' -%}
+{%- if text == '强烈买入' -%}
+70%-100%
+{%- elif text == '买入' -%}
+50%-70%
+{%- elif text == '持有' -%}
+30%-50%
+{%- elif text == '观望' -%}
+0%-20%
+{%- elif text == '减仓' -%}
+10%-30%
+{%- elif text == '卖出' -%}
+0%-10%
+{%- else -%}
+0%-30%
+{%- endif -%}
+{%- endmacro -%}
+
 # 🎯 {{ report_date }} 决策仪表盘
 
 💬 共分析 {{ results|length }} 只 ETF | 🟢买入:{{ buy_count }} 🟡观望:{{ hold_count }} 🔴卖出:{{ sell_count }}
@@ -60,6 +79,27 @@
 
 📢 最新动态: {{ show(intel.get('latest_news')) }}
 
+🧭 主题跟踪
+{% if result.theme_tags %}
+• 主题标签：{{ result.theme_tags | join(' / ') }}
+{% else %}
+• 主题标签：暂无相关数据
+{% endif %}
+{% if result.theme_intel.get('theme_summary') %}
+• 主题概览：{{ result.theme_intel.get('theme_summary') }}
+{% endif %}
+{% if result.theme_intel.get('sentiment_summary') %}
+• 主题情绪：{{ result.theme_intel.get('sentiment_summary') }}
+{% endif %}
+{% set theme_pos = result.theme_intel.get('positive_catalysts') or [] %}
+{% if theme_pos %}
+• 主题利好：{% for item in theme_pos %}{{ item }}{% if not loop.last %}；{% endif %}{% endfor %}
+{% endif %}
+{% set theme_neg = result.theme_intel.get('risk_alerts') or [] %}
+{% if theme_neg %}
+• 主题风险：{% for item in theme_neg %}{{ item }}{% if not loop.last %}；{% endif %}{% endfor %}
+{% endif %}
+
 📌 核心结论
 
 {{ e.signal_emoji }} {{ e.signal_text }} | {{ result.trend_prediction or '暂无相关数据' }}
@@ -71,6 +111,7 @@
 {%- set pos_advice = core.get('position_advice', {}) -%}
 • 持仓情况：🆕 空仓者 | 操作建议：{{ show(pos_advice.get('no_position', result.operation_advice)) }}
 • 持仓情况：💼 持仓者 | 操作建议：{{ show(pos_advice.get('has_position')) }}
+• 仓位建议：{{ position_suggestion(e.signal_text) }}
 
 📈 当日行情
 
@@ -96,37 +137,23 @@
 量能: 量比 {{ show(vol_data.get('volume_ratio')) }} ({{ show(vol_data.get('volume_status')) }}) | 换手率 {{ show(vol_data.get('turnover_rate')) }}%
 💡 {{ show(vol_data.get('volume_meaning')) }}
 
-{%- set chip_data = data_persp.get('chip_structure', {}) -%}
-筹码: 获利比例 {{ show(chip_data.get('profit_ratio')) }} | 平均成本 {{ show(chip_data.get('avg_cost')) }} | 集中度 {{ show(chip_data.get('concentration')) }} {{ chip_data.get('chip_health') or '' }}
-
-{%- set etf_data = data_persp.get('etf_structure', {}) -%}
-{% if etf_data %}
-ETF 结构: 折溢价 {{ show_with_suffix(etf_data.get('premium_discount_pct'), '%') }} | 跟踪误差 {{ show(etf_data.get('tracking_error')) }} | 份额变动 {{ show(etf_data.get('share_change_pct')) }} | 规模变动 {{ show(etf_data.get('aum_change_pct')) }} | 流动性评分 {{ show(etf_data.get('liquidity_score')) }} | 价差代理 {{ show_with_suffix(etf_data.get('spread_proxy'), '%') }}
+🧱 结构质量
+{% if result.etf_features %}
+• 折溢价：{{ show_with_suffix(result.etf_features.get('premium_discount_pct'), '%') }} | 跟踪误差：{{ show(result.etf_features.get('tracking_error')) }}
+• 流动性评分：{{ show(result.etf_features.get('liquidity_score')) }} | 价差代理：{{ show_with_suffix(result.etf_features.get('spread_proxy'), '%') }}
 {% else %}
-ETF 结构: 暂无相关数据
-{% endif %}
-
-🎯 作战计划
-
-{%- set sniper = battle.get('sniper_points', {}) -%}
-📍 狙击点位
-• 点位类型：🎯 理想买入点 | 价格：{{ show(sniper.get('ideal_buy')) }}
-• 点位类型：🔵 次优买入点 | 价格：{{ show(sniper.get('secondary_buy')) }}
-• 点位类型：🛑 止损位 | 价格：{{ show(sniper.get('stop_loss')) }}
-• 点位类型：🎊 目标位 | 价格：{{ show(sniper.get('take_profit')) }}
-
-{%- set position = battle.get('position_strategy', {}) -%}
-💰 仓位建议: {{ show(position.get('suggested_position')) }}
-• 建仓策略: {{ show(position.get('entry_plan')) }}
-• 风控策略: {{ show(position.get('risk_control')) }}
-
-{%- set checklist = battle.get('action_checklist', []) -%}
-✅ 检查清单
-{% if checklist %}{% for item in checklist %}
-• {{ item }}
-{% endfor %}{% else %}
 • 暂无相关数据
 {% endif %}
+
+💧 资金流向
+{% set flow_share = result.etf_features.get('share_change_pct') if result.etf_features else none %}
+{% set flow_aum = result.etf_features.get('aum_change_pct') if result.etf_features else none %}
+{% if flow_share or flow_aum %}
+• 份额变动：{{ show(flow_share) }} | 规模变动：{{ show(flow_aum) }}
+{% else %}
+• 份额/规模数据暂缺，可参考成交活跃度与换手情况
+{% endif %}
+• 成交活跃度：量比 {{ show(vol_data.get('volume_ratio')) }} | 换手率 {{ show(vol_data.get('turnover_rate')) }}%
 
 {% endfor %}
 {% endif %}

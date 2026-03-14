@@ -25,6 +25,9 @@ class ResultView:
     buy_reason: str
     risk_warning: str
     market_snapshot: dict[str, Any]
+    theme_tags: list[str]
+    theme_intel: dict[str, Any]
+    etf_features: dict[str, Any]
 
 
 def render_daily_report_markdown(
@@ -229,6 +232,13 @@ def _build_template_context(
         factors = row.get("factors", {})
         if not isinstance(factors, dict):
             factors = {}
+        theme_tags = _normalize_list(factors.get("theme_tags"))
+        theme_intel = factors.get("theme_intel")
+        if not isinstance(theme_intel, dict):
+            theme_intel = {}
+        etf_features = factors.get("etf_features")
+        if not isinstance(etf_features, dict):
+            etf_features = {}
 
         dashboard = _ensure_dashboard(dashboard, factors, market_snapshot)
 
@@ -246,6 +256,9 @@ def _build_template_context(
                 buy_reason=str(payload.get("buy_reason") or ""),
                 risk_warning=str(payload.get("risk_warning") or ""),
                 market_snapshot=market_snapshot,
+                theme_tags=theme_tags,
+                theme_intel=theme_intel,
+                etf_features=etf_features,
             )
         )
 
@@ -483,6 +496,16 @@ def _escape_md(text: str) -> str:
     if not text:
         return ""
     return text.replace("*", "\\*").replace("_", "\\_")
+
+
+def _normalize_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return []
 
 
 def _clean_sniper_value(val: Any) -> str:

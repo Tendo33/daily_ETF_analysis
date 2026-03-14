@@ -140,6 +140,7 @@ def test_renderer_pretty_layout(monkeypatch) -> None:
     assert "📌 核心结论" in markdown
     assert "📈 当日行情" in markdown
     assert "📊 数据透视" in markdown
-    assert "🎯 作战计划" in markdown
-    assert "✅ 检查清单" in markdown
+    assert "🧭 主题跟踪" in markdown
+    assert "🧱 结构质量" in markdown
+    assert "💧 资金流向" in markdown
     assert "────────" in markdown
