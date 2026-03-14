@@ -65,8 +65,6 @@ def _send_skip_notification(
     logger.info(f"Skip notification sent={result.sent} reason={result.reason}")
 
 
-
-
 def _start_api(host: str, port: int) -> None:
     uvicorn.run(
         "daily_etf_analysis.api.app:app",

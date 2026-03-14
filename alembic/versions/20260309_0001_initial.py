@@ -7,9 +7,9 @@ Create Date: 2026-03-09 00:00:00.000000
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260309_0001"
 down_revision = None
@@ -71,7 +71,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_etf_realtime_quotes_symbol", "etf_realtime_quotes", ["symbol"])
-    op.create_index("ix_etf_realtime_quotes_quote_time", "etf_realtime_quotes", ["quote_time"])
+    op.create_index(
+        "ix_etf_realtime_quotes_quote_time", "etf_realtime_quotes", ["quote_time"]
+    )
 
     op.create_table(
         "analysis_tasks",
@@ -105,13 +107,21 @@ def upgrade() -> None:
         sa.Column("risk_alerts_json", sa.Text(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_etf_analysis_reports_task_id", "etf_analysis_reports", ["task_id"])
-    op.create_index("ix_etf_analysis_reports_symbol", "etf_analysis_reports", ["symbol"])
-    op.create_index("ix_etf_analysis_reports_trade_date", "etf_analysis_reports", ["trade_date"])
+    op.create_index(
+        "ix_etf_analysis_reports_task_id", "etf_analysis_reports", ["task_id"]
+    )
+    op.create_index(
+        "ix_etf_analysis_reports_symbol", "etf_analysis_reports", ["symbol"]
+    )
+    op.create_index(
+        "ix_etf_analysis_reports_trade_date", "etf_analysis_reports", ["trade_date"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_etf_analysis_reports_trade_date", table_name="etf_analysis_reports")
+    op.drop_index(
+        "ix_etf_analysis_reports_trade_date", table_name="etf_analysis_reports"
+    )
     op.drop_index("ix_etf_analysis_reports_symbol", table_name="etf_analysis_reports")
     op.drop_index("ix_etf_analysis_reports_task_id", table_name="etf_analysis_reports")
     op.drop_table("etf_analysis_reports")

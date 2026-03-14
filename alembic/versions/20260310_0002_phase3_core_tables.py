@@ -7,9 +7,9 @@ Create Date: 2026-03-10 00:00:00.000000
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260310_0002"
 down_revision = "20260309_0001"
@@ -77,7 +77,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_backtest_results_run_id", "backtest_results", ["run_id"])
     op.create_index("ix_backtest_results_symbol", "backtest_results", ["symbol"])
-    op.create_index("ix_backtest_results_trade_date", "backtest_results", ["trade_date"])
+    op.create_index(
+        "ix_backtest_results_trade_date", "backtest_results", ["trade_date"]
+    )
     op.create_index(
         "ix_backtest_results_run_symbol_trade_date",
         "backtest_results",

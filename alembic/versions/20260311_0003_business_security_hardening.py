@@ -7,9 +7,9 @@ Create Date: 2026-03-11 00:00:00.000000
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260311_0003"
 down_revision = "20260310_0002"
@@ -29,7 +29,9 @@ def upgrade() -> None:
             )
         )
         batch_op.add_column(
-            sa.Column("analyzed_count", sa.Integer(), nullable=False, server_default="0")
+            sa.Column(
+                "analyzed_count", sa.Integer(), nullable=False, server_default="0"
+            )
         )
         batch_op.add_column(
             sa.Column("skipped_count", sa.Integer(), nullable=False, server_default="0")

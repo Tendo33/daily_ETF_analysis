@@ -7,9 +7,9 @@ Create Date: 2026-03-11 00:30:00.000000
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260311_0004"
 down_revision = "20260311_0003"
@@ -80,7 +80,9 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("run_id"),
     )
-    op.create_index("ix_analysis_runs_status", "analysis_runs", ["status"], unique=False)
+    op.create_index(
+        "ix_analysis_runs_status", "analysis_runs", ["status"], unique=False
+    )
     op.create_index(
         "ix_analysis_runs_run_window",
         "analysis_runs",
@@ -106,7 +108,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_analysis_run_audit_logs_run_id", table_name="analysis_run_audit_logs")
+    op.drop_index(
+        "ix_analysis_run_audit_logs_run_id", table_name="analysis_run_audit_logs"
+    )
     op.drop_table("analysis_run_audit_logs")
 
     op.drop_index("ix_analysis_runs_run_window", table_name="analysis_runs")
